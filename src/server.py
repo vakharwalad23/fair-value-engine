@@ -8,7 +8,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from config import settings
+from src.config import settings
 from src.core.fair_engine import FairEngine
 from src.core.models import FairResult
 from src.scrip.scrip_master import ScripMaster

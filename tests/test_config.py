@@ -1,7 +1,7 @@
 import os
 
 def test_settings_defaults():
-    from config import Settings
+    from src.config import Settings
     s = Settings()
     assert s.HOST == os.getenv("HOST", "0.0.0.0")
     assert s.PORT == int(os.getenv("PORT", "8000"))
@@ -11,6 +11,6 @@ def test_settings_defaults():
     assert not hasattr(s, "FEED_MODE")
 
 def test_total_slots():
-    from config import Settings
+    from src.config import Settings
     s = Settings()
     assert s.total_slots == s.MAX_CONNECTIONS * s.INSTRUMENTS_PER_CONNECTION

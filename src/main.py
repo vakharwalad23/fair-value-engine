@@ -14,7 +14,7 @@ def main():
     parser.add_argument("--interval", type=float, default=30.0, help="Snapshot log interval (seconds)")
     args = parser.parse_args()
 
-    from server import engine, app
+    from src.server import engine, app
     from src.core.models import FairResult
 
     def snapshot_log(results: list[FairResult]):
