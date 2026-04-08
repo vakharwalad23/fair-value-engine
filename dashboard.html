@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>F&O Fare Engine</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Space+Grotesk:wght@400;600;700&display=swap');
+
+  :root {
+    --bg:        #080c10;
+    --bg2:       #0d1117;
+    --bg3:       #141b24;
+    --border:    #1e2d3d;
+    --text:      #c9d1d9;
+    --muted:     #4a5568;
+    --accent:    #00d4ff;
+    --green:     #00ff88;
+    --red:       #ff4757;
+    --yellow:    #ffd43b;
+    --purple:    #bd93f9;
+    --mono:      'JetBrains Mono', monospace;
+    --sans:      'Space Grotesk', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Scanline overlay ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .logo {
+    font-family: var(--sans);
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+  .logo span { color: var(--accent); }
+
+  .status-bar {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    display: inline-block;
+    animation: pulse 2s infinite;
+  }
+  .dot.live { background: var(--green); }
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* ── Controls ── */
+  .controls {
+    display: flex;
+    gap: 10px;
+    padding: 10px 20px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .ctrl-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  select, input[type=number], input[type=text] {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    outline: none;
+  }
+  select:focus, input:focus {
+    border-color: var(--accent);
+  }
+
+  button {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 14px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.active { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 700; }
+
+  /* ── Stats bar ── */
+  .statsbar {
+    display: flex;
+    gap: 0;
+    padding: 0 20px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+  }
+  .stat {
+    padding: 8px 20px 8px 0;
+    margin-right: 20px;
+    border-right: 1px solid var(--border);
+    font-size: 11px;
+  }
+  .stat:last-child { border-right: none; }
+  .stat-label { color: var(--muted); margin-bottom: 2px; }
+  .stat-val { font-size: 16px; font-weight: 700; font-family: var(--sans); }
+
+  /* ── Main layout ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    height: calc(100vh - 130px);
+  }
+
+  /* ── Table ── */
+  .table-wrap {
+    overflow-y: auto;
+    padding: 0;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  thead th {
+    position: sticky;
+    top: 0;
+    background: var(--bg2);
+    padding: 9px 12px;
+    text-align: right;
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+  }
+  thead th:first-child { text-align: left; }
+  thead th:hover { color: var(--accent); }
+
+  tbody tr {
+    border-bottom: 1px solid rgba(30,45,61,0.5);
+    transition: background 0.1s;
+  }
+  tbody tr:hover { background: rgba(0,212,255,0.03); }
+
+  tbody td {
+    padding: 8px 12px;
+    text-align: right;
+    white-space: nowrap;
+  }
+  tbody td:first-child { text-align: left; }
+
+  .flash-up { animation: flashUp 0.4s ease; }
+  .flash-dn { animation: flashDn 0.4s ease; }
+  @keyframes flashUp { 0%,100%{background:transparent} 50%{background:rgba(0,255,136,0.15)} }
+  @keyframes flashDn { 0%,100%{background:transparent} 50%{background:rgba(255,71,87,0.15)} }
+
+  .sym { font-weight: 600; color: var(--text); font-size: 12px; }
+  .typ-CE { color: var(--green); }
+  .typ-PE { color: var(--red); }
+  .typ-FUT { color: var(--purple); }
+
+  .sig-OVERVALUED  { color: var(--red);    font-weight: 700; }
+  .sig-UNDERVALUED { color: var(--green);  font-weight: 700; }
+  .sig-FAIR        { color: var(--muted); }
+
+  .bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+  .bar {
+    height: 3px;
+    border-radius: 2px;
+    min-width: 4px;
+    max-width: 80px;
+    transition: width 0.3s;
+  }
+  .bar.over  { background: var(--red); }
+  .bar.under { background: var(--green); }
+
+  /* ── Side panel ── */
+  .side {
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .side-header {
+    padding: 10px 14px;
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+  }
+
+  .signal-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .signal-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .signal-card:hover { border-color: var(--accent); }
+  .signal-card.over  { border-left: 3px solid var(--red); }
+  .signal-card.under { border-left: 3px solid var(--green); }
+
+  .sc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .sc-sym { font-size: 12px; font-weight: 700; }
+  .sc-sig { font-size: 10px; font-weight: 700; }
+  .sc-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+  .sc-val { color: var(--text); }
+
+  .greeks-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+    font-size: 10px;
+    color: var(--muted);
+  }
+  .greek-item { display: flex; justify-content: space-between; }
+  .greek-val  { color: var(--purple); }
+
+  /* ── Bottom ticker ── */
+  .ticker-strip {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 28px;
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    font-size: 11px;
+  }
+  .ticker-inner {
+    display: flex;
+    gap: 40px;
+    animation: scroll 60s linear infinite;
+    white-space: nowrap;
+    padding-left: 100%;
+  }
+  @keyframes scroll {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-100%); }
+  }
+  .ticker-item { display: flex; gap: 8px; }
+  .ti-sym { color: var(--accent); }
+  .ti-mp  { color: var(--text); }
+  .ti-mis { }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* ── Add contract modal ── */
+  .modal-bg {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-bg.open { display: flex; }
+  .modal {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    width: 420px;
+    max-width: 95vw;
+  }
+  .modal h3 { font-family: var(--sans); margin-bottom: 16px; color: var(--accent); }
+  .form-row { margin-bottom: 10px; }
+  .form-row label { display: block; font-size: 10px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; }
+  .form-row input, .form-row select { width: 100%; }
+  .modal-btns { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+  .btn-primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 700; }
+  .btn-primary:hover { background: transparent; color: var(--accent); }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">F<span>&</span>O FARE ENGINE</div>
+  <div class="status-bar">
+    <div style="display:flex;gap:6px;align-items:center">
+      <span class="dot" id="wsDot"></span>
+      <span id="wsStatus">Connecting...</span>
+    </div>
+    <span id="tickCount">0 ticks</span>
+    <span id="clock"></span>
+  </div>
+</header>
+
+<div class="controls">
+  <div class="ctrl-group">
+    <span>Filter:</span>
+    <select id="filterSignal">
+      <option value="ALL">All Signals</option>
+      <option value="OVERVALUED">Overvalued</option>
+      <option value="UNDERVALUED">Undervalued</option>
+      <option value="FAIR">Fair</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <span>Type:</span>
+    <select id="filterType">
+      <option value="ALL">All Types</option>
+      <option value="CE">Calls (CE)</option>
+      <option value="PE">Puts (PE)</option>
+      <option value="FUT">Futures</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <span>Min mis%:</span>
+    <input type="number" id="minMis" value="0" step="0.5" min="0" style="width:70px" />
+  </div>
+  <div class="ctrl-group">
+    <span>Interval (s):</span>
+    <input type="number" id="intervalSec" value="30" step="5" min="5" style="width:70px" />
+    <button onclick="setInterval_()">Set</button>
+  </div>
+  <button onclick="openModal()">+ Add Contract</button>
+  <button id="sortBtn" onclick="toggleSort()">Sort: Mis%↓</button>
+</div>
+
+<div class="statsbar">
+  <div class="stat">
+    <div class="stat-label">CONTRACTS</div>
+    <div class="stat-val" id="statContracts">0</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">OVERVALUED</div>
+    <div class="stat-val sig-OVERVALUED" id="statOver">0</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">UNDERVALUED</div>
+    <div class="stat-val sig-UNDERVALUED" id="statUnder">0</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">MAX MIS%</div>
+    <div class="stat-val" id="statMaxMis">0.00%</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">TICKS/SEC</div>
+    <div class="stat-val" id="statTps">0</div>
+  </div>
+</div>
+
+<div class="layout">
+  <div class="table-wrap">
+    <table id="fareTable">
+      <thead>
+        <tr>
+          <th onclick="sortBy('symbol')">Symbol</th>
+          <th onclick="sortBy('type')">Type</th>
+          <th onclick="sortBy('strike')">Strike</th>
+          <th onclick="sortBy('market_price')">Market</th>
+          <th onclick="sortBy('fair_value')">Fair Value</th>
+          <th onclick="sortBy('mispricing')">Mis ₹</th>
+          <th onclick="sortBy('mispricing_pct')">Mis %</th>
+          <th onclick="sortBy('iv')">IV%</th>
+          <th onclick="sortBy('delta')">Δ Delta</th>
+          <th onclick="sortBy('signal_strength')">Signal</th>
+        </tr>
+      </thead>
+      <tbody id="fareBody">
+        <tr><td colspan="10" class="empty-state">Waiting for live feed...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="side">
+    <div class="side-header">⚡ Top Signals</div>
+    <div class="signal-list" id="signalList">
+      <div class="empty-state">No signals yet</div>
+    </div>
+  </div>
+</div>
+
+<div class="ticker-strip">
+  <div class="ticker-inner" id="tickerInner"></div>
+</div>
+
+<!-- Add Contract Modal -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <h3>Add Contract</h3>
+    <div class="form-row">
+      <label>Security ID</label>
+      <input type="text" id="f_secid" placeholder="e.g. 42528" />
+    </div>
+    <div class="form-row">
+      <label>Symbol</label>
+      <input type="text" id="f_symbol" placeholder="e.g. NIFTY23500CE" />
+    </div>
+    <div class="form-row">
+      <label>Contract Type</label>
+      <select id="f_type">
+        <option>CE</option><option>PE</option><option>FUT</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Strike (blank for futures)</label>
+      <input type="number" id="f_strike" placeholder="23500" />
+    </div>
+    <div class="form-row">
+      <label>Expiry (YYYY-MM-DD)</label>
+      <input type="text" id="f_expiry" placeholder="2025-04-24" />
+    </div>
+    <div class="form-row">
+      <label>Underlying Security ID</label>
+      <input type="text" id="f_und_id" placeholder="13 (NIFTY)" value="13" />
+    </div>
+    <div class="form-row">
+      <label>Underlying Symbol</label>
+      <input type="text" id="f_und_sym" placeholder="NIFTY" value="NIFTY" />
+    </div>
+    <div class="form-row">
+      <label>Exchange Segment</label>
+      <input type="text" id="f_seg" value="NSE_FNO" />
+    </div>
+    <div class="modal-btns">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" onclick="addContract()">Add</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── State ───
+const fare = {}; // security_id -> data
+let tickCount = 0;
+let tps = 0;
+let tpsWindow = [];
+let sortField = 'signal_strength';
+let sortAsc = false;
+let ws;
+
+// ─── WebSocket ───
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws/fare`);
+
+  ws.onopen = () => {
+    setStatus(true);
+    ws.send('ping');
+  };
+
+  ws.onclose = () => {
+    setStatus(false);
+    setTimeout(connect, 3000);
+  };
+
+  ws.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+    const prev = fare[d.security_id];
+    fare[d.security_id] = d;
+    tickCount++;
+    tpsWindow.push(Date.now());
+    onFare(d, prev);
+  };
+}
+
+function setStatus(live) {
+  const dot = document.getElementById('wsDot');
+  const txt = document.getElementById('wsStatus');
+  dot.className = 'dot' + (live ? ' live' : '');
+  txt.textContent = live ? 'LIVE' : 'Reconnecting...';
+}
+
+// ─── Render row ───
+function onFare(d, prev) {
+  updateStats();
+  updateRow(d, prev);
+  updateSidePanel();
+  updateTicker();
+}
+
+function fmt(n, dec=2) {
+  if (n == null) return '—';
+  return Number(n).toFixed(dec);
+}
+
+function signalClass(sig) {
+  if (sig === 'OVERVALUED')  return 'sig-OVERVALUED';
+  if (sig === 'UNDERVALUED') return 'sig-UNDERVALUED';
+  return 'sig-FAIR';
+}
+
+function updateRow(d, prev) {
+  const tbody = document.getElementById('fareBody');
+
+  // Check filter
+  const sig   = document.getElementById('filterSignal').value;
+  const typ   = document.getElementById('filterType').value;
+  const minM  = parseFloat(document.getElementById('minMis').value) || 0;
+  const hidden = (sig !== 'ALL' && d.signal !== sig)
+              || (typ !== 'ALL' && d.type !== typ)
+              || Math.abs(d.mispricing_pct) < minM;
+
+  let row = document.getElementById(`row-${d.security_id}`);
+
+  if (hidden) {
+    if (row) row.style.display = 'none';
+    return;
+  }
+
+  const misColor = d.mispricing > 0 ? 'var(--red)' : (d.mispricing < 0 ? 'var(--green)' : 'var(--muted)');
+  const barW = Math.min(80, Math.abs(d.mispricing_pct) * 8) + 'px';
+  const barClass = d.mispricing > 0 ? 'over' : 'under';
+
+  const html = `
+    <td class="sym">${d.symbol}</td>
+    <td class="typ-${d.type}">${d.type}</td>
+    <td>${d.strike != null ? fmt(d.strike, 0) : '—'}</td>
+    <td>${fmt(d.market_price)}</td>
+    <td>${fmt(d.fair_value)}</td>
+    <td style="color:${misColor}">${d.mispricing >= 0 ? '+' : ''}${fmt(d.mispricing)}</td>
+    <td>
+      <div class="bar-wrap">
+        <span style="color:${misColor}">${d.mispricing_pct >= 0 ? '+' : ''}${fmt(d.mispricing_pct)}%</span>
+        <div class="bar ${barClass}" style="width:${barW}"></div>
+      </div>
+    </td>
+    <td>${d.iv != null ? fmt(d.iv) + '%' : '—'}</td>
+    <td>${d.delta != null ? fmt(d.delta, 4) : '—'}</td>
+    <td class="${signalClass(d.signal)}">${d.signal}</td>
+  `;
+
+  if (!row) {
+    row = document.createElement('tr');
+    row.id = `row-${d.security_id}`;
+    // Remove empty state row
+    const empty = tbody.querySelector('.empty-state');
+    if (empty) empty.parentElement.remove();
+    tbody.appendChild(row);
+  }
+
+  row.innerHTML = html;
+  row.style.display = '';
+
+  // Flash animation
+  if (prev && prev.market_price !== d.market_price) {
+    row.classList.remove('flash-up', 'flash-dn');
+    void row.offsetWidth;
+    row.classList.add(d.market_price > prev.market_price ? 'flash-up' : 'flash-dn');
+  }
+}
+
+function redrawAll() {
+  // Re-sort and redraw all rows
+  const all = getSortedFare();
+  const tbody = document.getElementById('fareBody');
+  all.forEach(d => {
+    const row = document.getElementById(`row-${d.security_id}`);
+    if (row) tbody.appendChild(row); // re-order
+    updateRow(d, null);
+  });
+}
+
+function getSortedFare() {
+  const arr = Object.values(fare);
+  arr.sort((a, b) => {
+    const av = a[sortField] ?? 0;
+    const bv = b[sortField] ?? 0;
+    return sortAsc ? av - bv : bv - av;
+  });
+  return arr;
+}
+
+// ─── Stats ───
+function updateStats() {
+  const all = Object.values(fare);
+  const over  = all.filter(d => d.signal === 'OVERVALUED').length;
+  const under = all.filter(d => d.signal === 'UNDERVALUED').length;
+  const maxMis = Math.max(0, ...all.map(d => Math.abs(d.mispricing_pct)));
+
+  document.getElementById('statContracts').textContent = all.length;
+  document.getElementById('statOver').textContent = over;
+  document.getElementById('statUnder').textContent = under;
+  document.getElementById('statMaxMis').textContent = fmt(maxMis) + '%';
+  document.getElementById('tickCount').textContent = tickCount + ' ticks';
+}
+
+// ─── Side panel ───
+function updateSidePanel() {
+  const signals = Object.values(fare)
+    .filter(d => d.signal !== 'FAIR')
+    .sort((a, b) => b.signal_strength - a.signal_strength)
+    .slice(0, 12);
+
+  const list = document.getElementById('signalList');
+  if (!signals.length) {
+    list.innerHTML = '<div class="empty-state">No signals</div>';
+    return;
+  }
+
+  list.innerHTML = signals.map(d => {
+    const cls = d.signal === 'OVERVALUED' ? 'over' : 'under';
+    const sigColor = d.signal === 'OVERVALUED' ? 'var(--red)' : 'var(--green)';
+    const action = d.signal === 'OVERVALUED' ? '⬇ SHORT' : '⬆ LONG';
+    return `
+    <div class="signal-card ${cls}">
+      <div class="sc-header">
+        <span class="sc-sym">${d.symbol}</span>
+        <span class="sc-sig" style="color:${sigColor}">${action}</span>
+      </div>
+      <div class="sc-row"><span>Market</span><span class="sc-val">₹${fmt(d.market_price)}</span></div>
+      <div class="sc-row"><span>Fair Value</span><span class="sc-val">₹${fmt(d.fair_value)}</span></div>
+      <div class="sc-row"><span>Mispricing</span><span class="sc-val" style="color:${sigColor}">${d.mispricing_pct >= 0 ? '+' : ''}${fmt(d.mispricing_pct)}%</span></div>
+      ${d.iv != null ? `
+      <div class="greeks-row">
+        <div class="greek-item"><span>IV</span><span class="greek-val">${fmt(d.iv)}%</span></div>
+        <div class="greek-item"><span>Δ</span><span class="greek-val">${fmt(d.delta, 4)}</span></div>
+        <div class="greek-item"><span>θ</span><span class="greek-val">${fmt(d.theta, 4)}</span></div>
+        <div class="greek-item"><span>Γ</span><span class="greek-val">${fmt(d.gamma, 6)}</span></div>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// ─── Ticker strip ───
+function updateTicker() {
+  const items = Object.values(fare).slice(0, 20);
+  const inner = document.getElementById('tickerInner');
+  inner.innerHTML = items.map(d => {
+    const c = d.mispricing > 0 ? 'var(--red)' : 'var(--green)';
+    return `<span class="ticker-item">
+      <span class="ti-sym">${d.symbol}</span>
+      <span class="ti-mp">₹${fmt(d.market_price)}</span>
+      <span class="ti-mis" style="color:${c}">${d.mispricing_pct >= 0 ? '+' : ''}${fmt(d.mispricing_pct)}%</span>
+    </span>`;
+  }).join('');
+}
+
+// ─── Sorting ───
+function sortBy(field) {
+  if (sortField === field) sortAsc = !sortAsc;
+  else { sortField = field; sortAsc = false; }
+  redrawAll();
+}
+function toggleSort() {
+  sortAsc = !sortAsc;
+  redrawAll();
+}
+
+// ─── Clock & TPS ───
+setInterval(() => {
+  const now = Date.now();
+  tpsWindow = tpsWindow.filter(t => now - t < 1000);
+  document.getElementById('statTps').textContent = tpsWindow.length;
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-IN', {hour12: false});
+}, 1000);
+
+// ─── Filter listeners ───
+['filterSignal','filterType','minMis'].forEach(id => {
+  document.getElementById(id).addEventListener('change', redrawAll);
+});
+
+// ─── Interval ───
+async function setInterval_() {
+  const sec = parseFloat(document.getElementById('intervalSec').value);
+  await fetch('/api/intervals', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({interval_seconds: sec}),
+  });
+}
+
+// ─── Modal ───
+function openModal()  { document.getElementById('modalBg').classList.add('open'); }
+function closeModal() { document.getElementById('modalBg').classList.remove('open'); }
+
+async function addContract() {
+  const body = {
+    security_id:           document.getElementById('f_secid').value,
+    symbol:                document.getElementById('f_symbol').value,
+    contract_type:         document.getElementById('f_type').value,
+    strike:                parseFloat(document.getElementById('f_strike').value) || null,
+    expiry:                document.getElementById('f_expiry').value,
+    underlying_security_id: document.getElementById('f_und_id').value,
+    underlying_symbol:     document.getElementById('f_und_sym').value,
+    exchange_segment:      document.getElementById('f_seg').value,
+  };
+
+  const resp = await fetch('/api/contracts/add', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body),
+  });
+
+  if (resp.ok) {
+    closeModal();
+  } else {
+    const err = await resp.json();
+    alert('Error: ' + JSON.stringify(err.detail));
+  }
+}
+
+// ─── Init ───
+connect();
+</script>
+</body>
+</html>
