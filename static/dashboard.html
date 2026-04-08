@@ -1,0 +1,1501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>F&amp;O Fair Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet" />
+<style>
+:root {
+  --bg:     #080c10;
+  --bg2:    #0d1117;
+  --bg3:    #141b24;
+  --border: #1e2d3d;
+  --text:   #c9d1d9;
+  --muted:  #4a5568;
+  --accent: #00d4ff;
+  --green:  #00ff88;
+  --red:    #ff4757;
+  --yellow: #ffd43b;
+  --purple: #bd93f9;
+  --mono:   'JetBrains Mono', monospace;
+  --sans:   'Space Grotesk', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  min-height: 100vh;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Header */
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.logo {
+  font-family: var(--sans);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  white-space: nowrap;
+}
+.logo span { color: var(--accent); }
+
+.header-search {
+  flex: 1;
+  min-width: 160px;
+  max-width: 320px;
+}
+.header-search input {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  outline: none;
+}
+.header-search input:focus { border-color: var(--accent); }
+.header-search input::placeholder { color: var(--muted); }
+
+.slot-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.slot-bar-track {
+  width: 80px;
+  height: 6px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.slot-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.4s;
+  width: 0%;
+}
+.slot-text { color: var(--text); font-size: 11px; }
+
+.btn-tier-config {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn-tier-config:hover { border-color: var(--accent); color: var(--accent); }
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: auto;
+  white-space: nowrap;
+}
+.dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  display: inline-block;
+  animation: pulse 2s infinite;
+  flex-shrink: 0;
+}
+.dot.live { background: var(--green); }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+/* Tab Bar */
+.tab-bar {
+  display: flex;
+  gap: 2px;
+  padding: 0 20px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  padding: 9px 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: 0;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Main content area */
+.main-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Tab panes */
+.tab-pane {
+  display: none;
+  flex: 1;
+  overflow: hidden;
+  flex-direction: column;
+  min-height: 0;
+}
+.tab-pane.active { display: flex; }
+
+/* Common table styles */
+.table-scroll {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg2);
+  padding: 8px 12px;
+  text-align: right;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+  white-space: nowrap;
+}
+thead th:first-child { text-align: left; }
+thead th.sortable { cursor: pointer; }
+thead th.sortable:hover { color: var(--accent); }
+
+tbody tr {
+  border-bottom: 1px solid rgba(30,45,61,0.5);
+  transition: background 0.1s;
+}
+tbody tr:hover { background: rgba(0,212,255,0.03); }
+tbody tr.stale-row { opacity: 0.45; }
+
+tbody td {
+  padding: 7px 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+tbody td:first-child { text-align: left; }
+
+.sym { font-weight: 600; color: var(--text); font-size: 12px; }
+.typ-CE  { color: var(--green); }
+.typ-PE  { color: var(--red); }
+.typ-FUT { color: var(--purple); }
+
+.sig-OVERVALUED  { color: var(--red);   font-weight: 700; }
+.sig-UNDERVALUED { color: var(--green); font-weight: 700; }
+.sig-FAIR        { color: var(--muted); }
+
+.flash-up { animation: flashUp 0.4s ease; }
+.flash-dn { animation: flashDn 0.4s ease; }
+@keyframes flashUp { 0%,100%{background:transparent} 50%{background:rgba(0,255,136,0.12)} }
+@keyframes flashDn { 0%,100%{background:transparent} 50%{background:rgba(255,71,87,0.12)} }
+
+.btn-unsub {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-unsub:hover { border-color: var(--red); color: var(--red); }
+
+.badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.badge-t1 { background: rgba(0,212,255,0.15); color: var(--accent); }
+.badge-t2 { background: rgba(189,147,249,0.15); color: var(--purple); }
+.badge-t3 { background: rgba(255,212,59,0.15); color: var(--yellow); }
+.badge-cross { background: rgba(0,212,255,0.08); color: var(--accent); border: 1px solid rgba(0,212,255,0.2); }
+.badge-stale { background: rgba(74,85,104,0.2); color: var(--muted); font-size: 9px; }
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Signals Tab */
+.signals-section {
+  padding: 12px 16px 6px;
+  flex-shrink: 0;
+}
+.signals-section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--muted);
+  padding: 0 0 6px 0;
+  margin-bottom: 0;
+}
+.section-over { border-left: 3px solid var(--red); padding-left: 10px; color: var(--red); }
+.section-under { border-left: 3px solid var(--green); padding-left: 10px; color: var(--green); }
+
+.signals-half {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-bottom: 1px solid var(--border);
+}
+.signals-half:last-child { border-bottom: none; }
+
+.signals-layout {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* By Underlying Tab */
+.underlying-controls {
+  display: flex;
+  gap: 10px;
+  padding: 10px 16px;
+  align-items: center;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.ctrl-label {
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+select, input[type=number], input[type=text] {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  outline: none;
+}
+select:focus, input[type=number]:focus, input[type=text]:focus {
+  border-color: var(--accent);
+}
+
+/* All Subscribed Tab */
+.all-sub-info {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 8px 16px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.all-sub-info strong { color: var(--text); }
+
+/* Search Results Tab */
+.search-info {
+  padding: 10px 16px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.search-info span { color: var(--text); }
+
+.btn-subscribe {
+  background: transparent;
+  border: 1px solid var(--green);
+  color: var(--green);
+  padding: 3px 10px;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn-subscribe:hover { background: rgba(0,255,136,0.1); }
+.btn-subscribe:disabled { opacity: 0.4; cursor: default; }
+
+.slot-hint {
+  font-size: 10px;
+  color: var(--muted);
+  display: block;
+  margin-top: 2px;
+}
+
+/* Tier Config Panel */
+.tier-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 200;
+}
+.tier-overlay.open { display: block; }
+
+.tier-panel {
+  position: fixed;
+  top: 0;
+  right: -420px;
+  width: 400px;
+  max-width: 95vw;
+  height: 100vh;
+  background: var(--bg2);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  z-index: 201;
+  transition: right 0.25s ease;
+  overflow: hidden;
+}
+.tier-panel.open { right: 0; }
+
+.tier-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tier-header h3 {
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.btn-close-tier {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.btn-close-tier:hover { border-color: var(--red); color: var(--red); }
+
+.tier-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.tier-section {
+  margin-bottom: 20px;
+}
+.tier-section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--muted);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.checkbox-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 3px;
+  transition: background 0.1s;
+}
+.checkbox-item:hover { background: rgba(0,212,255,0.05); }
+.checkbox-item input[type=checkbox] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+}
+
+.form-row {
+  margin-bottom: 10px;
+}
+.form-row label {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.form-row input[type=text],
+.form-row input[type=number],
+.form-row select {
+  width: 100%;
+}
+.form-row textarea {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  outline: none;
+  resize: vertical;
+  min-height: 60px;
+}
+.form-row textarea:focus { border-color: var(--accent); }
+
+.tier3-list {
+  list-style: none;
+  max-height: 150px;
+  overflow-y: auto;
+}
+.tier3-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(30,45,61,0.5);
+}
+.tier3-list li:last-child { border-bottom: none; }
+.btn-rm-t3 {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 4px;
+  transition: color 0.1s;
+}
+.btn-rm-t3:hover { color: var(--red); }
+
+.tier-footer {
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.total-slots-bar {
+  margin-bottom: 12px;
+}
+.slot-bar-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.slot-bar-label span { color: var(--text); }
+.slot-bar-track-lg {
+  width: 100%;
+  height: 8px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.slot-bar-fill-lg {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 0.4s;
+  width: 0%;
+}
+.btn-apply {
+  width: 100%;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--bg);
+  padding: 8px 14px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-apply:hover { background: transparent; color: var(--accent); }
+
+/* Metrics Legend */
+.legend-bar {
+  flex-shrink: 0;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+}
+.legend-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: color 0.15s;
+}
+.legend-toggle:hover { color: var(--text); }
+.legend-toggle .arrow { transition: transform 0.2s; display: inline-block; }
+.legend-toggle.open .arrow { transform: rotate(180deg); }
+
+.legend-content {
+  display: none;
+  overflow-x: auto;
+  max-height: 220px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+.legend-content.open { display: block; }
+
+.legend-content table {
+  font-size: 11px;
+}
+.legend-content thead th {
+  font-size: 10px;
+  background: var(--bg3);
+  padding: 6px 12px;
+}
+.legend-content tbody td {
+  padding: 5px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(30,45,61,0.4);
+}
+.legend-content tbody td:first-child { font-weight: 600; color: var(--accent); white-space: nowrap; }
+.legend-content tbody td:nth-child(2) { color: var(--muted); font-size: 10px; font-family: var(--mono); }
+.legend-content tbody td:nth-child(3) { color: var(--text); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="logo">F<span>&amp;</span>O FAIR ENGINE</div>
+  <div class="header-search">
+    <input type="text" id="searchInput" placeholder="Search contracts... (NIFTY 23500 CE)" autocomplete="off" />
+  </div>
+  <div class="slot-meter">
+    <div class="slot-bar-track"><div class="slot-bar-fill" id="slotBarFill"></div></div>
+    <span class="slot-text" id="slotText">— / —</span>
+    <button class="btn-tier-config" id="btnTierConfig">Tier Config</button>
+  </div>
+  <div class="header-status">
+    <span class="dot" id="wsDot"></span>
+    <span id="wsStatus">Connecting...</span>
+    <span id="clock"></span>
+  </div>
+</header>
+
+<!-- Tab Bar -->
+<div class="tab-bar">
+  <button class="tab-btn active" id="tab-signals" onclick="switchTab('signals')">Signals</button>
+  <button class="tab-btn" id="tab-underlying" onclick="switchTab('underlying')">By Underlying</button>
+  <button class="tab-btn" id="tab-all" onclick="switchTab('all')">All Subscribed</button>
+  <button class="tab-btn" id="tab-search" onclick="switchTab('search')">Search Results</button>
+</div>
+
+<!-- Main Content -->
+<div class="main-content">
+
+  <!-- Signals Tab -->
+  <div class="tab-pane active" id="pane-signals">
+    <div class="signals-layout">
+      <div class="signals-half">
+        <div class="signals-section">
+          <div class="signals-section-title section-over">OVERVALUED — short candidates</div>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th class="sortable" onclick="signalSort('symbol')">Symbol</th>
+                <th>Type</th>
+                <th class="sortable" onclick="signalSort('strike')">Strike</th>
+                <th class="sortable" onclick="signalSort('market_price')">Mkt</th>
+                <th class="sortable" onclick="signalSort('fair_value')">Fair</th>
+                <th class="sortable" onclick="signalSort('mispricing_pct')">Mis%</th>
+                <th class="sortable" onclick="signalSort('implied_volatility')">IV</th>
+                <th class="sortable" onclick="signalSort('iv_rank')">IVR</th>
+                <th class="sortable" onclick="signalSort('delta')">Delta</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="overBody">
+              <tr><td colspan="10" class="empty-state">No overvalued contracts</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="signals-half">
+        <div class="signals-section">
+          <div class="signals-section-title section-under">UNDERVALUED — long candidates</div>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th class="sortable" onclick="signalSort('symbol')">Symbol</th>
+                <th>Type</th>
+                <th class="sortable" onclick="signalSort('strike')">Strike</th>
+                <th class="sortable" onclick="signalSort('market_price')">Mkt</th>
+                <th class="sortable" onclick="signalSort('fair_value')">Fair</th>
+                <th class="sortable" onclick="signalSort('mispricing_pct')">Mis%</th>
+                <th class="sortable" onclick="signalSort('implied_volatility')">IV</th>
+                <th class="sortable" onclick="signalSort('iv_rank')">IVR</th>
+                <th class="sortable" onclick="signalSort('delta')">Delta</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="underBody">
+              <tr><td colspan="10" class="empty-state">No undervalued contracts</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- By Underlying Tab -->
+  <div class="tab-pane" id="pane-underlying">
+    <div class="underlying-controls">
+      <label class="ctrl-label">
+        Underlying:
+        <select id="selUnderlying" onchange="onUnderlyingChange()">
+          <option value="">-- select --</option>
+        </select>
+      </label>
+      <label class="ctrl-label">
+        Expiry:
+        <select id="selExpiry" onchange="renderUnderlying()">
+          <option value="">-- select --</option>
+        </select>
+      </label>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th class="sortable" onclick="underlyingSort('symbol')">Symbol</th>
+            <th>Type</th>
+            <th class="sortable" onclick="underlyingSort('strike')">Strike</th>
+            <th class="sortable" onclick="underlyingSort('market_price')">Mkt</th>
+            <th class="sortable" onclick="underlyingSort('fair_value')">Fair</th>
+            <th class="sortable" onclick="underlyingSort('mispricing_pct')">Mis%</th>
+            <th class="sortable" onclick="underlyingSort('implied_volatility')">IV</th>
+            <th class="sortable" onclick="underlyingSort('delta')">Delta</th>
+            <th class="sortable" onclick="underlyingSort('signal')">Signal</th>
+          </tr>
+        </thead>
+        <tbody id="underlyingBody">
+          <tr><td colspan="9" class="empty-state">Select an underlying and expiry</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- All Subscribed Tab -->
+  <div class="tab-pane" id="pane-all">
+    <div class="all-sub-info">
+      Showing <strong id="allCount">0</strong> contracts &nbsp;|&nbsp; Slots: <strong id="allSlotInfo">—</strong>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th class="sortable" onclick="allSort('symbol')">Symbol</th>
+            <th>Type</th>
+            <th class="sortable" onclick="allSort('strike')">Strike</th>
+            <th class="sortable" onclick="allSort('expiry')">Expiry</th>
+            <th class="sortable" onclick="allSort('market_price')">Mkt</th>
+            <th class="sortable" onclick="allSort('fair_value')">Fair</th>
+            <th class="sortable" onclick="allSort('mispricing_pct')">Mis%</th>
+            <th class="sortable" onclick="allSort('implied_volatility')">IV</th>
+            <th class="sortable" onclick="allSort('iv_rank')">IVR</th>
+            <th class="sortable" onclick="allSort('delta')">Delta</th>
+            <th>Tier</th>
+            <th>Exchange</th>
+          </tr>
+        </thead>
+        <tbody id="allBody">
+          <tr><td colspan="12" class="empty-state">Waiting for data...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Search Results Tab -->
+  <div class="tab-pane" id="pane-search">
+    <div class="search-info" id="searchInfo">Type in the search bar to find contracts</div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th style="text-align:left">Symbol</th>
+            <th style="text-align:left">Trading Symbol</th>
+            <th>Strike</th>
+            <th>Expiry</th>
+            <th style="text-align:left">Exchange</th>
+            <th>Score</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="searchBody">
+          <tr><td colspan="7" class="empty-state">Search results will appear here</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- Metrics Legend -->
+<div class="legend-bar">
+  <button class="legend-toggle" id="legendToggle" onclick="toggleLegend()">
+    <span class="arrow">&#9660;</span>
+    <span id="legendLabel">Show Metrics Legend</span>
+  </button>
+  <div class="legend-content" id="legendContent">
+    <table>
+      <thead>
+        <tr>
+          <th style="text-align:left">Metric</th>
+          <th style="text-align:left">Formula</th>
+          <th style="text-align:left">Trading Use</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Delta</td><td>dV/dS</td><td>Directional exposure; hedge ratio for spot position</td></tr>
+        <tr><td>Gamma</td><td>d²V/dS²</td><td>Rate of delta change; high gamma = explosive moves near expiry</td></tr>
+        <tr><td>Theta</td><td>dV/dt</td><td>Daily time decay; short options benefit, long options lose</td></tr>
+        <tr><td>Vega</td><td>dV/dσ</td><td>Sensitivity to IV; buy before events, sell after</td></tr>
+        <tr><td>Vanna</td><td>d²V/dS dσ</td><td>Delta change w.r.t. IV; drives skew dynamics</td></tr>
+        <tr><td>Volga</td><td>d²V/dσ²</td><td>Convexity of vega; wings vs ATM pricing</td></tr>
+        <tr><td>Charm</td><td>d²V/dS dt</td><td>Delta bleed over time; critical for overnight holds</td></tr>
+        <tr><td>Speed</td><td>d³V/dS³</td><td>Gamma change w.r.t. price; gamma scalping precision</td></tr>
+        <tr><td>Color</td><td>d²Γ/dt dS</td><td>Gamma decay; how gamma profile shifts daily</td></tr>
+        <tr><td>Zomma</td><td>dΓ/dσ</td><td>Gamma sensitivity to IV; vanna hedging risk</td></tr>
+        <tr><td>IV Rank</td><td>(IV - IV_52wk_low) / (IV_52wk_high - IV_52wk_low)</td><td>0=cheapest, 1=expensive relative to history; sell >0.8</td></tr>
+        <tr><td>IV Percentile</td><td>% days IV was below current</td><td>More robust than IVR for skewed distributions</td></tr>
+        <tr><td>Moneyness</td><td>S/K (call) or K/S (put)</td><td>ITM/OTM classification; affects delta and time value</td></tr>
+        <tr><td>Intrinsic Value</td><td>max(S-K,0) call, max(K-S,0) put</td><td>Floor price; option never worth less</td></tr>
+        <tr><td>Time Value</td><td>Market Price - Intrinsic Value</td><td>Premium being paid for optionality; decays to zero</td></tr>
+        <tr><td>PC Parity Dev</td><td>C - P - (S - K·e^(-rT))</td><td>Arbitrage signal between call and put of same strike</td></tr>
+        <tr><td>Basis</td><td>Futures Price - Spot Price</td><td>Cost of carry signal; convergence to zero at expiry</td></tr>
+        <tr><td>Skew</td><td>IV(OTM put) - IV(ATM)</td><td>Market fear gauge; elevated = demand for downside protection</td></tr>
+        <tr><td>Exchange Spread</td><td>NSE Price - BSE Price</td><td>Cross-exchange arbitrage opportunity when spread &gt; transaction cost</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Tier Config Panel -->
+<div class="tier-overlay" id="tierOverlay" onclick="closeTierPanel()"></div>
+<div class="tier-panel" id="tierPanel">
+  <div class="tier-header">
+    <h3>Tier Configuration</h3>
+    <button class="btn-close-tier" onclick="closeTierPanel()">&#x2715;</button>
+  </div>
+  <div class="tier-body">
+    <div class="tier-section">
+      <div class="tier-section-title">Tier 1 — Index Underlyings</div>
+      <div class="checkbox-grid" id="tier1Checkboxes">
+        <label class="checkbox-item"><input type="checkbox" value="NIFTY" /> NIFTY</label>
+        <label class="checkbox-item"><input type="checkbox" value="BANKNIFTY" /> BANKNIFTY</label>
+        <label class="checkbox-item"><input type="checkbox" value="FINNIFTY" /> FINNIFTY</label>
+        <label class="checkbox-item"><input type="checkbox" value="MIDCPNIFTY" /> MIDCPNIFTY</label>
+        <label class="checkbox-item"><input type="checkbox" value="SENSEX" /> SENSEX</label>
+        <label class="checkbox-item"><input type="checkbox" value="BANKEX" /> BANKEX</label>
+      </div>
+    </div>
+    <div class="tier-section">
+      <div class="tier-section-title">Tier 2 — Stock Options</div>
+      <div class="form-row">
+        <label>Stock symbols (comma-separated)</label>
+        <textarea id="tier2Stocks" placeholder="RELIANCE, TCS, INFY, HDFC"></textarea>
+      </div>
+      <div class="form-row">
+        <label>ATM Range (strikes)</label>
+        <input type="number" id="tier2AtmRange" value="5" min="1" max="50" />
+      </div>
+      <div class="form-row">
+        <label>Expiry count</label>
+        <select id="tier2ExpiryCount">
+          <option value="1">1 (nearest)</option>
+          <option value="2">2</option>
+          <option value="3" selected>3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+        </select>
+      </div>
+    </div>
+    <div class="tier-section">
+      <div class="tier-section-title">Tier 3 — Manual Contracts (read-only)</div>
+      <ul class="tier3-list" id="tier3List">
+        <li style="color:var(--muted);font-size:11px;">No manual contracts</li>
+      </ul>
+    </div>
+  </div>
+  <div class="tier-footer">
+    <div class="total-slots-bar">
+      <div class="slot-bar-label">
+        <span>Total slots</span>
+        <span id="tierSlotText">— / —</span>
+      </div>
+      <div class="slot-bar-track-lg"><div class="slot-bar-fill-lg" id="tierSlotFill"></div></div>
+    </div>
+    <button class="btn-apply" onclick="saveTierConfig()">Apply Changes</button>
+  </div>
+</div>
+
+<script>
+// State
+const state = {};
+let activeTab = 'signals';
+let ws;
+let signalSortField = 'mispricing_pct';
+let signalSortAsc = false;
+let underlyingSortField = 'strike';
+let underlyingSortAsc = true;
+let allSortField = 'signal_strength';
+let allSortAsc = false;
+let searchQuery = '';
+
+// Utility
+function fmt(n, dec) {
+  if (n == null || n === undefined || isNaN(n)) return '—';
+  dec = dec != null ? dec : 2;
+  return Number(n).toFixed(dec);
+}
+
+function fmtPct(n) {
+  if (n == null || isNaN(n)) return '—';
+  const sign = n >= 0 ? '+' : '';
+  return sign + Number(n).toFixed(2) + '%';
+}
+
+function misColor(val) {
+  if (val == null) return 'var(--muted)';
+  if (val > 0) return 'var(--red)';
+  if (val < 0) return 'var(--green)';
+  return 'var(--muted)';
+}
+
+function debounce(fn, ms) {
+  let t;
+  return function(...args) {
+    clearTimeout(t);
+    t = setTimeout(() => fn.apply(this, args), ms);
+  };
+}
+
+// WebSocket
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws/fair`);
+
+  ws.onopen = () => {
+    setWsStatus(true);
+    ws.send('ping');
+  };
+
+  ws.onclose = () => {
+    setWsStatus(false);
+    setTimeout(connect, 3000);
+  };
+
+  ws.onerror = () => {
+    setWsStatus(false);
+  };
+
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data && data.security_id) {
+        onMessage(data);
+      }
+    } catch (_) {}
+  };
+}
+
+function setWsStatus(live) {
+  const dot = document.getElementById('wsDot');
+  const txt = document.getElementById('wsStatus');
+  dot.className = 'dot' + (live ? ' live' : '');
+  txt.textContent = live ? 'LIVE' : 'Reconnecting...';
+}
+
+function onMessage(data) {
+  const prev = state[data.security_id];
+  state[data.security_id] = data;
+
+  if (activeTab === 'signals') renderSignals();
+  else if (activeTab === 'underlying') renderUnderlying();
+  else if (activeTab === 'all') renderAll();
+
+  updateUnderlyingDropdown();
+}
+
+// Tab switching
+function switchTab(name) {
+  activeTab = name;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.getElementById('pane-' + name).classList.add('active');
+
+  if (name === 'signals') renderSignals();
+  else if (name === 'underlying') renderUnderlying();
+  else if (name === 'all') renderAll();
+  else if (name === 'search' && searchQuery) doSearch(searchQuery);
+}
+
+// Signals Tab
+function signalSort(field) {
+  if (signalSortField === field) signalSortAsc = !signalSortAsc;
+  else { signalSortField = field; signalSortAsc = false; }
+  renderSignals();
+}
+
+function renderSignals() {
+  const all = Object.values(state);
+
+  const over = all
+    .filter(d => d.signal === 'OVERVALUED')
+    .sort((a, b) => sortCmp(a, b, signalSortField, signalSortAsc));
+
+  const under = all
+    .filter(d => d.signal === 'UNDERVALUED')
+    .sort((a, b) => sortCmp(a, b, signalSortField, signalSortAsc));
+
+  renderSignalTable('overBody', over, 10);
+  renderSignalTable('underBody', under, 10);
+}
+
+function renderSignalTable(tbodyId, rows, colspan) {
+  const tbody = document.getElementById(tbodyId);
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="${colspan}" class="empty-state">No contracts in this category</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(d => {
+    const mc = misColor(d.mispricing);
+    return `<tr>
+      <td class="sym">${d.symbol}</td>
+      <td class="typ-${d.contract_type}">${d.contract_type}</td>
+      <td>${d.strike != null ? fmt(d.strike, 0) : '—'}</td>
+      <td>${fmt(d.market_price)}</td>
+      <td>${fmt(d.fair_value)}</td>
+      <td style="color:${mc}">${fmtPct(d.mispricing_pct)}</td>
+      <td>${d.implied_volatility != null ? fmt(d.implied_volatility) + '%' : '—'}</td>
+      <td>${d.iv_rank != null ? fmt(d.iv_rank, 2) : '—'}</td>
+      <td>${d.delta != null ? fmt(d.delta, 4) : '—'}</td>
+      <td><button class="btn-unsub" onclick="unsubscribe('${d.security_id}')">x</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function sortCmp(a, b, field, asc) {
+  let av = a[field];
+  let bv = b[field];
+  if (field === 'mispricing_pct') {
+    av = Math.abs(a.mispricing_pct || 0);
+    bv = Math.abs(b.mispricing_pct || 0);
+  }
+  if (av == null) av = asc ? Infinity : -Infinity;
+  if (bv == null) bv = asc ? Infinity : -Infinity;
+  if (typeof av === 'string') return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+  return asc ? av - bv : bv - av;
+}
+
+// By Underlying Tab
+function updateUnderlyingDropdown() {
+  const sel = document.getElementById('selUnderlying');
+  const currentVal = sel.value;
+  const underlyings = new Set();
+  Object.values(state).forEach(d => {
+    if (d.symbol) {
+      const sym = guessUnderlying(d.symbol);
+      if (sym) underlyings.add(sym);
+    }
+  });
+  const sorted = Array.from(underlyings).sort();
+  let html = '<option value="">-- select --</option>';
+  sorted.forEach(u => {
+    const sel2 = u === currentVal ? ' selected' : '';
+    html += `<option value="${u}"${sel2}>${u}</option>`;
+  });
+  sel.innerHTML = html;
+}
+
+function guessUnderlying(symbol) {
+  const knownIdx = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'];
+  for (const idx of knownIdx) {
+    if (symbol.startsWith(idx)) return idx;
+  }
+  const m = symbol.match(/^([A-Z]+)/);
+  return m ? m[1] : null;
+}
+
+async function onUnderlyingChange() {
+  const underlying = document.getElementById('selUnderlying').value;
+  const expirySelect = document.getElementById('selExpiry');
+  expirySelect.innerHTML = '<option value="">Loading...</option>';
+  if (!underlying) {
+    expirySelect.innerHTML = '<option value="">-- select --</option>';
+    renderUnderlying();
+    return;
+  }
+  try {
+    const resp = await fetch(`/api/scrip/expiries?symbol=${encodeURIComponent(underlying)}`);
+    if (resp.ok) {
+      const data = await resp.json();
+      let html = '<option value="">-- select --</option>';
+      (data.expiries || []).forEach(e => {
+        html += `<option value="${e}">${e}</option>`;
+      });
+      expirySelect.innerHTML = html;
+    } else {
+      expirySelect.innerHTML = '<option value="">-- select --</option>';
+    }
+  } catch (_) {
+    expirySelect.innerHTML = '<option value="">-- select --</option>';
+  }
+  renderUnderlying();
+}
+
+function underlyingSort(field) {
+  if (underlyingSortField === field) underlyingSortAsc = !underlyingSortAsc;
+  else { underlyingSortField = field; underlyingSortAsc = true; }
+  renderUnderlying();
+}
+
+function renderUnderlying() {
+  const underlying = document.getElementById('selUnderlying').value;
+  const expiry = document.getElementById('selExpiry').value;
+  const tbody = document.getElementById('underlyingBody');
+
+  if (!underlying || !expiry) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Select an underlying and expiry</td></tr>';
+    return;
+  }
+
+  let rows = Object.values(state).filter(d => {
+    if (!d.symbol) return false;
+    const sym = guessUnderlying(d.symbol);
+    return sym === underlying && d.expiry === expiry;
+  });
+
+  rows.sort((a, b) => sortCmp(a, b, underlyingSortField, underlyingSortAsc));
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No data for this underlying + expiry</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(d => {
+    const mc = misColor(d.mispricing);
+    const staleClass = d.stale ? ' stale-row' : '';
+    const staleTag = d.stale ? ' <span class="badge badge-stale">stale</span>' : '';
+    return `<tr class="${staleClass}">
+      <td class="sym">${d.symbol}${staleTag}</td>
+      <td class="typ-${d.contract_type}">${d.contract_type}</td>
+      <td>${d.strike != null ? fmt(d.strike, 0) : '—'}</td>
+      <td>${fmt(d.market_price)}</td>
+      <td>${fmt(d.fair_value)}</td>
+      <td style="color:${mc}">${fmtPct(d.mispricing_pct)}</td>
+      <td>${d.implied_volatility != null ? fmt(d.implied_volatility) + '%' : '—'}</td>
+      <td>${d.delta != null ? fmt(d.delta, 4) : '—'}</td>
+      <td class="sig-${d.signal}">${d.signal || '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+// All Subscribed Tab
+function allSort(field) {
+  if (allSortField === field) allSortAsc = !allSortAsc;
+  else { allSortField = field; allSortAsc = false; }
+  renderAll();
+}
+
+function renderAll() {
+  const tbody = document.getElementById('allBody');
+  const allCount = document.getElementById('allCount');
+
+  let rows = Object.values(state);
+  rows.sort((a, b) => sortCmp(a, b, allSortField, allSortAsc));
+
+  allCount.textContent = rows.length;
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="12" class="empty-state">Waiting for data...</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(d => {
+    const mc = misColor(d.mispricing);
+    const tierBadge = d.tier ? `<span class="badge badge-t${d.tier}">T${d.tier}</span>` : '—';
+    const exchBadge = d.cross_listed
+      ? `<span class="badge badge-cross">NSE|BSE</span>`
+      : (d.exchanges && d.exchanges.length ? d.exchanges[0] : '—');
+    const staleClass = d.stale ? ' stale-row' : '';
+    const staleTag = d.stale ? ' <span class="badge badge-stale">stale</span>' : '';
+    return `<tr class="${staleClass}">
+      <td class="sym">${d.symbol}${staleTag}</td>
+      <td class="typ-${d.contract_type}">${d.contract_type}</td>
+      <td>${d.strike != null ? fmt(d.strike, 0) : '—'}</td>
+      <td>${d.expiry || '—'}</td>
+      <td>${fmt(d.market_price)}</td>
+      <td>${fmt(d.fair_value)}</td>
+      <td style="color:${mc}">${fmtPct(d.mispricing_pct)}</td>
+      <td>${d.implied_volatility != null ? fmt(d.implied_volatility) + '%' : '—'}</td>
+      <td>${d.iv_rank != null ? fmt(d.iv_rank, 2) : '—'}</td>
+      <td>${d.delta != null ? fmt(d.delta, 4) : '—'}</td>
+      <td>${tierBadge}</td>
+      <td>${exchBadge}</td>
+    </tr>`;
+  }).join('');
+}
+
+// Search Tab
+const debouncedSearch = debounce(function(q) {
+  searchQuery = q;
+  if (!q.trim()) {
+    document.getElementById('searchBody').innerHTML = '<tr><td colspan="7" class="empty-state">Type to search</td></tr>';
+    document.getElementById('searchInfo').innerHTML = 'Type in the search bar to find contracts';
+    return;
+  }
+  switchTab('search');
+  doSearch(q);
+}, 300);
+
+async function doSearch(q) {
+  try {
+    const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}&limit=20`);
+    if (!resp.ok) throw new Error('Search failed');
+    const results = await resp.json();
+    renderSearch(results);
+  } catch (err) {
+    document.getElementById('searchBody').innerHTML = `<tr><td colspan="7" class="empty-state">Search error: ${err.message}</td></tr>`;
+  }
+}
+
+async function updateSlotMeter() {
+  try {
+    const resp = await fetch('/api/slots');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const used = data.used || 0;
+    const total = data.total || 1;
+    const pct = Math.min(100, (used / total) * 100);
+    document.getElementById('slotBarFill').style.width = pct + '%';
+    document.getElementById('slotText').textContent = `${used.toLocaleString()} / ${total.toLocaleString()}`;
+    document.getElementById('allSlotInfo').textContent = `${used} / ${total}`;
+    document.getElementById('tierSlotText').textContent = `${used} / ${total}`;
+    document.getElementById('tierSlotFill').style.width = pct + '%';
+  } catch (_) {}
+}
+
+function renderSearch(results) {
+  const tbody = document.getElementById('searchBody');
+  const info = document.getElementById('searchInfo');
+
+  info.innerHTML = `Found <span>${results.length}</span> result(s) for "<span>${searchQuery}</span>"`;
+
+  if (!results.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No results found</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = results.map(r => {
+    const alreadySubbed = r.subscribed;
+    const slotCost = r.slot_cost || 1;
+
+    let actionCell;
+    if (alreadySubbed) {
+      actionCell = `<span style="color:var(--muted);font-size:11px;">subscribed</span>`;
+    } else {
+      actionCell = `
+        <div>
+          <button class="btn-subscribe" onclick="subscribe('${r.symbol}','${r.expiry || ''}','${r.strike || ''}','${r.contract_type || ''}', this)">
+            + Subscribe
+          </button>
+          <span class="slot-hint">uses ${slotCost} slot${slotCost !== 1 ? 's' : ''}</span>
+        </div>`;
+    }
+
+    return `<tr>
+      <td class="sym">${r.symbol || '—'}</td>
+      <td style="color:var(--muted);font-size:11px;">${r.trading_symbol || r.symbol || '—'}</td>
+      <td>${r.strike != null ? fmt(r.strike, 0) : '—'}</td>
+      <td>${r.expiry || '—'}</td>
+      <td>${r.exchange || r.exchange_segment || '—'}</td>
+      <td>${r.score != null ? fmt(r.score, 1) : '—'}</td>
+      <td>${actionCell}</td>
+    </tr>`;
+  }).join('');
+}
+
+// Subscribe / Unsubscribe
+async function subscribe(symbol, expiry, strike, contractType, btn) {
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Adding...';
+  }
+  try {
+    const body = { symbol, expiry, strike: strike ? parseFloat(strike) : null, contract_type: contractType };
+    const resp = await fetch('/api/contracts/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (resp.ok) {
+      if (btn) {
+        btn.textContent = 'Added';
+        btn.style.color = 'var(--green)';
+        btn.style.borderColor = 'var(--green)';
+      }
+      await updateSlotMeter();
+    } else {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      if (btn) {
+        btn.textContent = '+ Subscribe';
+        btn.disabled = false;
+      }
+      alert('Subscribe error: ' + (err.detail || JSON.stringify(err)));
+    }
+  } catch (err) {
+    if (btn) { btn.textContent = '+ Subscribe'; btn.disabled = false; }
+    alert('Subscribe error: ' + err.message);
+  }
+}
+
+async function unsubscribe(secId) {
+  try {
+    const resp = await fetch(`/api/contracts/unsubscribe/${secId}`, { method: 'DELETE' });
+    if (resp.ok) {
+      delete state[secId];
+      renderSignals();
+      renderAll();
+      await updateSlotMeter();
+    } else {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      alert('Unsubscribe error: ' + (err.detail || JSON.stringify(err)));
+    }
+  } catch (err) {
+    alert('Unsubscribe error: ' + err.message);
+  }
+}
+
+// Tier Config Panel
+function openTierPanel() {
+  document.getElementById('tierOverlay').classList.add('open');
+  document.getElementById('tierPanel').classList.add('open');
+  loadTierConfig();
+}
+
+function closeTierPanel() {
+  document.getElementById('tierOverlay').classList.remove('open');
+  document.getElementById('tierPanel').classList.remove('open');
+}
+
+async function loadTierConfig() {
+  try {
+    const resp = await fetch('/api/tiers');
+    if (!resp.ok) return;
+    const cfg = await resp.json();
+
+    // Tier 1 checkboxes
+    document.querySelectorAll('#tier1Checkboxes input[type=checkbox]').forEach(cb => {
+      cb.checked = (cfg.tier1_underlyings || []).includes(cb.value);
+    });
+
+    // Tier 2
+    document.getElementById('tier2Stocks').value = (cfg.tier2_stocks || []).join(', ');
+    document.getElementById('tier2AtmRange').value = cfg.tier2_atm_range || 5;
+    const ecSel = document.getElementById('tier2ExpiryCount');
+    ecSel.value = String(cfg.tier2_expiry_count || 3);
+
+    // Tier 3
+    const tier3 = cfg.tier3_contracts || [];
+    const ul = document.getElementById('tier3List');
+    if (!tier3.length) {
+      ul.innerHTML = '<li style="color:var(--muted);font-size:11px;">No manual contracts</li>';
+    } else {
+      ul.innerHTML = tier3.map(c => {
+        const id = typeof c === 'object' ? (c.security_id || c) : c;
+        const label = typeof c === 'object' ? (c.symbol || id) : id;
+        return `<li><span>${label}</span><button class="btn-rm-t3" onclick="removeT3('${id}')">&#x2715;</button></li>`;
+      }).join('');
+    }
+
+    await updateSlotMeter();
+  } catch (_) {}
+}
+
+function removeT3(secId) {
+  delete state[secId];
+  unsubscribe(secId);
+}
+
+async function saveTierConfig() {
+  const tier1 = Array.from(document.querySelectorAll('#tier1Checkboxes input[type=checkbox]'))
+    .filter(cb => cb.checked)
+    .map(cb => cb.value);
+
+  const rawStocks = document.getElementById('tier2Stocks').value;
+  const tier2Stocks = rawStocks.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+  const atmRange = parseInt(document.getElementById('tier2AtmRange').value) || 5;
+  const expiryCount = parseInt(document.getElementById('tier2ExpiryCount').value) || 3;
+
+  try {
+    const resp = await fetch('/api/tiers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tier1_underlyings: tier1,
+        tier2_stocks: tier2Stocks,
+        tier2_atm_range: atmRange,
+        tier2_expiry_count: expiryCount,
+      }),
+    });
+    if (resp.ok) {
+      closeTierPanel();
+      await updateSlotMeter();
+    } else {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      alert('Save error: ' + (err.detail || JSON.stringify(err)));
+    }
+  } catch (err) {
+    alert('Save error: ' + err.message);
+  }
+}
+
+// Metrics Legend
+function toggleLegend() {
+  const toggle = document.getElementById('legendToggle');
+  const content = document.getElementById('legendContent');
+  const label = document.getElementById('legendLabel');
+  const isOpen = content.classList.contains('open');
+  if (isOpen) {
+    content.classList.remove('open');
+    toggle.classList.remove('open');
+    label.textContent = 'Show Metrics Legend';
+  } else {
+    content.classList.add('open');
+    toggle.classList.add('open');
+    label.textContent = 'Hide Metrics Legend';
+  }
+}
+
+// Clock
+setInterval(() => {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-IN', { hour12: false });
+}, 1000);
+
+// Slot meter refresh
+setInterval(updateSlotMeter, 15000);
+
+// Search input wiring
+document.getElementById('searchInput').addEventListener('input', function() {
+  debouncedSearch(this.value);
+});
+
+// Tier config button
+document.getElementById('btnTierConfig').addEventListener('click', openTierPanel);
+
+// Init
+connect();
+updateSlotMeter();
+</script>
+</body>
+</html>
