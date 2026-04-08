@@ -1,8 +1,16 @@
 """Black-Scholes pricing and Greeks for F&O fair value calculation."""
 import math
-from typing import Optional
+import time
+import threading
+import logging
+from collections import deque
+from datetime import date
+from typing import Optional, Callable
 
-from src.core.models import ContractType
+from src.core.models import ContractType, ContractMeta, Tick, FairResult
+from src.utils.time_utils import time_to_expiry_years, ist_now
+
+logger = logging.getLogger(__name__)
 
 
 def _norm_cdf(x: float) -> float:
@@ -142,3 +150,372 @@ def implied_volatility_newton(
 def future_fair_value(S: float, T: float, r: float, d: float = 0.0) -> float:
     """Cost of Carry model: F = S * e^((r-d)*T)."""
     return S * math.exp((r - d) * T)
+
+
+class FairEngine:
+    """Thread-safe engine that maintains contract state and emits FairResult updates."""
+
+    # Maximum entries retained in IV and result history per contract
+    _MAX_HISTORY = 1000
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+
+        # security_id -> ContractMeta
+        self._contracts: dict[str, ContractMeta] = {}
+
+        # underlying_security_id -> latest LTP
+        self._underlying_ltp: dict[str, float] = {}
+
+        # security_id -> latest LTP
+        self._ltp: dict[str, float] = {}
+
+        # security_id -> deque of FairResult
+        self._history: dict[str, deque] = {}
+
+        # security_id -> latest FairResult
+        self._results: dict[str, FairResult] = {}
+
+        # security_id -> list of (date_str, iv) — one entry per calendar day
+        self._iv_history: dict[str, list] = {}
+
+        # (underlying_symbol, expiry, strike) -> {"CE": sid, "PE": sid}
+        self._pairs: dict[tuple, dict] = {}
+
+        # callbacks registered via on_fair_update
+        self._update_callbacks: list[Callable] = []
+
+        # (interval_s, callback) pairs registered via on_snapshot
+        self._snapshot_callbacks: list[tuple[float, Callable, float]] = []
+
+        self._stopped = False
+
+    def register_contract(self, meta: ContractMeta) -> None:
+        """Register a contract and update the pairs index."""
+        with self._lock:
+            self._contracts[meta.security_id] = meta
+            self._history[meta.security_id] = deque(maxlen=self._MAX_HISTORY)
+            if meta.contract_type in (ContractType.CALL, ContractType.PUT) and meta.strike is not None:
+                key = (meta.underlying_symbol, meta.expiry, meta.strike)
+                if key not in self._pairs:
+                    self._pairs[key] = {}
+                side = "CE" if meta.contract_type == ContractType.CALL else "PE"
+                self._pairs[key][side] = meta.security_id
+
+    def deregister_contract(self, security_id: str) -> None:
+        """Remove a contract and clean up associated state."""
+        with self._lock:
+            meta = self._contracts.pop(security_id, None)
+            self._history.pop(security_id, None)
+            self._results.pop(security_id, None)
+            self._ltp.pop(security_id, None)
+            self._iv_history.pop(security_id, None)
+            if meta and meta.contract_type in (ContractType.CALL, ContractType.PUT) and meta.strike is not None:
+                key = (meta.underlying_symbol, meta.expiry, meta.strike)
+                pair = self._pairs.get(key, {})
+                side = "CE" if meta.contract_type == ContractType.CALL else "PE"
+                pair.pop(side, None)
+                if not pair:
+                    self._pairs.pop(key, None)
+
+    def on_fair_update(self, callback: Callable) -> None:
+        """Register a callback invoked with FairResult on every recalculation."""
+        with self._lock:
+            self._update_callbacks.append(callback)
+
+    def on_snapshot(self, interval: float, callback: Callable) -> None:
+        """Register a periodic snapshot callback (interval in seconds)."""
+        with self._lock:
+            self._snapshot_callbacks.append((interval, callback, time.time()))
+
+    def on_tick(self, tick: Tick) -> None:
+        """Process a price tick, recalculate all affected contracts."""
+        if self._stopped:
+            return
+
+        with self._lock:
+            # Check if this is an underlying tick
+            affected_sids = []
+            for sid, meta in self._contracts.items():
+                if meta.underlying_security_id == tick.security_id:
+                    self._underlying_ltp[tick.security_id] = tick.ltp
+                    affected_sids.append(sid)
+                    break
+            else:
+                # It is a contract tick
+                if tick.security_id in self._contracts:
+                    self._ltp[tick.security_id] = tick.ltp
+
+            # If underlying updated, recalculate all contracts on that underlying
+            if affected_sids:
+                self._underlying_ltp[tick.security_id] = tick.ltp
+                for sid, meta in self._contracts.items():
+                    if meta.underlying_security_id == tick.security_id and sid in self._ltp:
+                        affected_sids.append(sid) if sid not in affected_sids else None
+                # Rebuild: recalc all contracts with known underlying price
+                affected_sids = [
+                    sid for sid, meta in self._contracts.items()
+                    if meta.underlying_security_id == tick.security_id and sid in self._ltp
+                ]
+            else:
+                # Only recalculate the contract that just updated
+                if tick.security_id in self._contracts:
+                    affected_sids = [tick.security_id]
+
+            results_to_emit = []
+            for sid in affected_sids:
+                meta = self._contracts.get(sid)
+                if meta is None:
+                    continue
+                result = self._calculate(meta)
+                if result is not None:
+                    self._results[sid] = result
+                    self._history[sid].append(result)
+                    results_to_emit.append(result)
+
+        # Emit callbacks outside the lock
+        for result in results_to_emit:
+            for cb in self._update_callbacks:
+                try:
+                    cb(result)
+                except Exception:
+                    logger.exception("on_fair_update callback raised")
+
+    def _calculate(self, meta: ContractMeta) -> Optional[FairResult]:
+        """Dispatch to future or option calculator."""
+        S = self._underlying_ltp.get(meta.underlying_security_id)
+        market_price = self._ltp.get(meta.security_id)
+        if S is None or market_price is None:
+            return None
+
+        T = time_to_expiry_years(meta.expiry)
+        r = meta.risk_free_rate
+
+        if meta.contract_type == ContractType.FUTURE:
+            return self._calc_future(meta, S, market_price, T, r)
+        return self._calc_option(meta, S, market_price, T, r)
+
+    def _calc_future(
+        self, meta: ContractMeta, S: float, market_price: float, T: float, r: float
+    ) -> FairResult:
+        """Calculate fair value for a futures contract."""
+        fv = future_fair_value(S, T, r)
+        mispricing = market_price - fv
+        mispricing_pct = (mispricing / fv * 100) if fv > 0 else 0.0
+        basis = market_price - S
+
+        return FairResult(
+            security_id=meta.security_id,
+            symbol=meta.symbol,
+            contract_type=meta.contract_type,
+            strike=meta.strike,
+            expiry=meta.expiry.isoformat(),
+            market_price=market_price,
+            fair_value=fv,
+            mispricing=mispricing,
+            mispricing_pct=mispricing_pct,
+            underlying_price=S,
+            time_to_expiry=T,
+            basis=basis,
+            cross_listed=meta.cross_listed,
+            exchanges=list(meta.exchanges),
+            tier=meta.tier,
+        )
+
+    def _calc_option(
+        self, meta: ContractMeta, S: float, market_price: float, T: float, r: float
+    ) -> Optional[FairResult]:
+        """Calculate fair value and market structure metrics for an option."""
+        K = meta.strike
+        if K is None:
+            return None
+
+        iv = implied_volatility_newton(market_price, S, K, T, r, meta.contract_type)
+
+        if iv is not None:
+            self._update_iv_history(meta.security_id, iv)
+            bs = black_scholes(S, K, T, r, iv, meta.contract_type)
+        else:
+            # Fall back to a default vol for fair value estimation
+            bs = black_scholes(S, K, T, r, 0.15, meta.contract_type)
+
+        if bs is None:
+            return None
+
+        fv = bs["price"]
+        mispricing = market_price - fv
+        mispricing_pct = (mispricing / fv * 100) if fv > 0 else 0.0
+
+        iv_rank, iv_percentile = self._calc_iv_rank_percentile(meta.security_id, iv) if iv else (None, None)
+        moneyness = self._calc_moneyness(S, K, iv or 0.15, T)
+        intrinsic = self._calc_intrinsic(S, K, meta.contract_type)
+        time_val = max(market_price - intrinsic, 0.0)
+
+        pcp_dev = self._calc_parity_deviation(meta, S, T, r)
+        skew = self._calc_skew(meta)
+
+        return FairResult(
+            security_id=meta.security_id,
+            symbol=meta.symbol,
+            contract_type=meta.contract_type,
+            strike=K,
+            expiry=meta.expiry.isoformat(),
+            market_price=market_price,
+            fair_value=fv,
+            mispricing=mispricing,
+            mispricing_pct=mispricing_pct,
+            underlying_price=S,
+            time_to_expiry=T,
+            delta=bs.get("delta"),
+            gamma=bs.get("gamma"),
+            theta=bs.get("theta"),
+            vega=bs.get("vega"),
+            implied_volatility=iv,
+            vanna=bs.get("vanna"),
+            volga=bs.get("volga"),
+            charm=bs.get("charm"),
+            speed=bs.get("speed"),
+            color=bs.get("color"),
+            zomma=bs.get("zomma"),
+            iv_rank=iv_rank,
+            iv_percentile=iv_percentile,
+            moneyness=moneyness,
+            intrinsic_value=intrinsic,
+            time_value=time_val,
+            pc_parity_deviation=pcp_dev,
+            skew=skew,
+            cross_listed=meta.cross_listed,
+            exchanges=list(meta.exchanges),
+            tier=meta.tier,
+        )
+
+    def _update_iv_history(self, security_id: str, iv: float) -> None:
+        """Store one IV entry per calendar day (overwrites same-day entry)."""
+        today_str = ist_now().date().isoformat()
+        history = self._iv_history.setdefault(security_id, [])
+        # Replace today's entry if it exists, otherwise append
+        for i, (d, _) in enumerate(history):
+            if d == today_str:
+                history[i] = (today_str, iv)
+                return
+        history.append((today_str, iv))
+        # Keep at most _MAX_HISTORY daily entries
+        if len(history) > self._MAX_HISTORY:
+            del history[0]
+
+    def _calc_iv_rank_percentile(
+        self, security_id: str, current_iv: Optional[float]
+    ) -> tuple[Optional[float], Optional[float]]:
+        """Compute IV rank and IV percentile from daily IV history."""
+        if current_iv is None:
+            return None, None
+        history = self._iv_history.get(security_id, [])
+        iv_values = [v for _, v in history]
+        if len(iv_values) < 2:
+            return None, None
+        lo, hi = min(iv_values), max(iv_values)
+        if hi == lo:
+            return 0.0, 0.0
+        iv_rank = (current_iv - lo) / (hi - lo) * 100
+        iv_percentile = sum(1 for v in iv_values if v <= current_iv) / len(iv_values) * 100
+        return iv_rank, iv_percentile
+
+    def _calc_moneyness(self, S: float, K: float, sigma: float, T: float) -> Optional[float]:
+        """Log-moneyness: ln(S/K) / (sigma * sqrt(T))."""
+        if sigma <= 0 or T <= 0 or K <= 0:
+            return None
+        try:
+            return math.log(S / K) / (sigma * math.sqrt(T))
+        except (ValueError, ZeroDivisionError):
+            return None
+
+    def _calc_intrinsic(self, S: float, K: float, contract_type: ContractType) -> float:
+        """Intrinsic value: max(S-K, 0) for calls, max(K-S, 0) for puts."""
+        if contract_type == ContractType.CALL:
+            return max(S - K, 0.0)
+        return max(K - S, 0.0)
+
+    def _calc_parity_deviation(
+        self, meta: ContractMeta, S: float, T: float, r: float
+    ) -> Optional[float]:
+        """Put-call parity deviation: C - P - (S - K*e^(-rT)).
+
+        Returns None if the counterpart price is not available.
+        """
+        if meta.strike is None:
+            return None
+        key = (meta.underlying_symbol, meta.expiry, meta.strike)
+        pair = self._pairs.get(key, {})
+        K = meta.strike
+        discount = math.exp(-r * T)
+
+        if meta.contract_type == ContractType.CALL:
+            pe_sid = pair.get("PE")
+            if pe_sid is None:
+                return None
+            pe_price = self._ltp.get(pe_sid)
+            if pe_price is None:
+                return None
+            call_price = self._ltp.get(meta.security_id, 0.0)
+            # C - P = S - K * e^(-rT) at parity
+            return call_price - pe_price - (S - K * discount)
+        else:
+            ce_sid = pair.get("CE")
+            if ce_sid is None:
+                return None
+            ce_price = self._ltp.get(ce_sid)
+            if ce_price is None:
+                return None
+            put_price = self._ltp.get(meta.security_id, 0.0)
+            return ce_price - put_price - (S - K * discount)
+
+    def _calc_skew(self, meta: ContractMeta) -> Optional[float]:
+        """IV skew: IV(PE) - IV(CE) at the same strike.
+
+        Returns None if the counterpart IV is not available.
+        """
+        if meta.strike is None:
+            return None
+        key = (meta.underlying_symbol, meta.expiry, meta.strike)
+        pair = self._pairs.get(key, {})
+
+        ce_sid = pair.get("CE")
+        pe_sid = pair.get("PE")
+        if ce_sid is None or pe_sid is None:
+            return None
+
+        ce_iv = self._get_latest_iv(ce_sid)
+        pe_iv = self._get_latest_iv(pe_sid)
+        if ce_iv is None or pe_iv is None:
+            return None
+        return pe_iv - ce_iv
+
+    def _get_latest_iv(self, security_id: str) -> Optional[float]:
+        """Return the most recently recorded IV for a contract."""
+        history = self._iv_history.get(security_id, [])
+        if not history:
+            return None
+        return history[-1][1]
+
+    def get_result(self, security_id: str) -> Optional[FairResult]:
+        """Return the latest FairResult for a contract, or None."""
+        with self._lock:
+            return self._results.get(security_id)
+
+    def get_all_results(self) -> list[FairResult]:
+        """Return all latest FairResults sorted by signal strength descending."""
+        with self._lock:
+            return sorted(self._results.values(), key=lambda r: r.signal_strength, reverse=True)
+
+    def get_history(self, security_id: str, limit: int = 100) -> list[FairResult]:
+        """Return up to `limit` recent FairResults for a contract."""
+        with self._lock:
+            h = self._history.get(security_id)
+            if h is None:
+                return []
+            items = list(h)
+            return items[-limit:]
+
+    def stop(self) -> None:
+        """Signal the engine to stop processing new ticks."""
+        self._stopped = True
