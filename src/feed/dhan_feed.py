@@ -1,4 +1,5 @@
-"""Single Dhan MarketFeed SDK wrapper."""
+"""Single Dhan DhanFeed SDK wrapper."""
+import asyncio
 import logging
 import threading
 import time
@@ -40,27 +41,32 @@ class DhanFeedClient:
         return self.MAX_INSTRUMENTS - self.slot_count
 
     def start(self):
-        from dhanhq import DhanFeed
-        instruments = self._build_instrument_list(list(self._subscribed))
-        self._feed = DhanFeed(
-            client_id=self._client_id,
-            access_token=self._access_token,
-            instruments=instruments,
-        )
-        self._feed.on_ticks = self._handle_tick
         self._running = True
         self._thread = threading.Thread(target=self._run_forever, name=f"feed-{self._connection_id}", daemon=True)
         self._thread.start()
         logger.info(f"Feed connection {self._connection_id} started with {len(self._subscribed)} instruments")
 
     def _run_forever(self):
-        try:
-            self._feed.run_forever()
-        except Exception as e:
-            logger.error(f"Feed {self._connection_id} error: {e}")
+        from dhanhq import DhanFeed
+        while self._running:
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                instruments = self._build_instrument_list(list(self._subscribed))
+                self._feed = DhanFeed(
+                    client_id=self._client_id,
+                    access_token=self._access_token,
+                    instruments=instruments,
+                )
+                self._feed.on_ticks = self._handle_tick
+                self._feed.run_forever()
+            except Exception as e:
+                logger.error(f"Feed {self._connection_id} error: {e}")
+            finally:
+                self._feed = None
             if self._running:
+                logger.info(f"Feed {self._connection_id} reconnecting in 5s...")
                 time.sleep(5)
-                self.start()
 
     def _handle_tick(self, tick_data):
         if isinstance(tick_data, list):
