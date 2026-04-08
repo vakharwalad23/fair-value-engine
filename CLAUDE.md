@@ -2,11 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Rules
-
-- **No Co-Authored-By in commits.** Never add `Co-Authored-By: Claude` or any similar attribution line to commit messages.
-- **No decorative comment separators.** Do not use lines like `# ─────────────`, `# ═════════════`, `# ─── Section ───`, or similar box-drawing/repeated-character comment dividers in code. Use plain `#` comments only.
-
 ## Project Overview
 
 Real-time F&O (Futures & Options) fair value calculation engine for Indian markets via Dhan broker. Calculates theoretical prices using Black-Scholes and Cost of Carry models, detects mispricing signals, and serves them via REST/WebSocket APIs.

@@ -216,3 +216,9 @@ __marimo__/
 .streamlit/secrets.toml
 
 .claude/
+!.claude/rules/
+
+/docs/superpowers/
+
+# Scrip master cache
+cache/
