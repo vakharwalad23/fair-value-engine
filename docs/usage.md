@@ -9,7 +9,7 @@
 
 ```bash
 # Clone
-git clone <repo-url> && cd fare-value
+git clone <repo-url> && cd fair-value-engine
 
 # Install
 python -m venv .venv
