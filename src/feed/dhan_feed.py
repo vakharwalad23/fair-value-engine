@@ -40,14 +40,14 @@ class DhanFeedClient:
         return self.MAX_INSTRUMENTS - self.slot_count
 
     def start(self):
-        from dhanhq import MarketFeed
+        from dhanhq import DhanFeed
         instruments = self._build_instrument_list(list(self._subscribed))
-        self._feed = MarketFeed(
-            client_id=self._client_id, access_token=self._access_token,
-            instruments=instruments, subscription_code=MarketFeed.Full,
+        self._feed = DhanFeed(
+            client_id=self._client_id,
+            access_token=self._access_token,
+            instruments=instruments,
         )
         self._feed.on_ticks = self._handle_tick
-        self._feed.on_close = self._handle_close
         self._running = True
         self._thread = threading.Thread(target=self._run_forever, name=f"feed-{self._connection_id}", daemon=True)
         self._thread.start()
@@ -70,18 +70,22 @@ class DhanFeedClient:
             self._process_single_tick(tick_data)
 
     def _process_single_tick(self, data: dict):
-        ltp = data.get("LTP") or data.get("ltp")
-        if ltp is None or ltp <= 0:
+        ltp_raw = data.get("LTP") or data.get("ltp")
+        if ltp_raw is None:
             return
+        ltp = float(ltp_raw)
+        if ltp <= 0:
+            return
+        oi = data.get("OI") or data.get("oi")
         tick = Tick(
             security_id=str(data.get("security_id", "")),
-            ltp=float(ltp), oi=data.get("oi"),
-            volume=data.get("volume"), bid=data.get("bid_price"), ask=data.get("ask_price"),
+            ltp=ltp,
+            oi=int(oi) if oi is not None else None,
+            volume=data.get("volume"),
+            bid=float(data["bid_price"]) if data.get("bid_price") else None,
+            ask=float(data["ask_price"]) if data.get("ask_price") else None,
         )
         self._on_tick(tick)
-
-    def _handle_close(self, *args):
-        logger.warning(f"Feed {self._connection_id} connection closed")
 
     def subscribe(self, security_id: str, exchange_segment: str):
         pair = (security_id, exchange_segment)
@@ -111,6 +115,6 @@ class DhanFeedClient:
         self._running = False
         if self._feed:
             try:
-                self._feed.close()
+                self._feed.close_connection()
             except Exception:
                 pass
