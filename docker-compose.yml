@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  fair-engine:
+    build: .
+    ports:
+      - "${PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      - SCRIP_CACHE_DIR=/app/cache
+    volumes:
+      - scrip_cache:/app/cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  scrip_cache:
