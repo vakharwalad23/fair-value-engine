@@ -1,143 +1,109 @@
-# F&O Fare Engine
+# F&O Fair Value Engine
 
-Real-time F&O fair value calculator using Dhan's live market feed.
+Real-time F&O fair value calculator for Indian markets. Calculates theoretical prices using Black-Scholes and Cost of Carry models, detects mispricing, and surfaces trading signals via a live dashboard.
 
 ## Architecture
 
-```
-Dhan WebSocket Feed
-        │
-        ▼
-  DhanFeedClient           ← binary packet parser (dhan_feed.py)
-        │  ticks
-        ▼
-   FareEngine              ← Black-Scholes / Cost-of-Carry (fare_engine.py)
-        │  FareResult
-        ├──► FastAPI REST  ← /api/fare, /api/signals etc (server.py)
-        └──► WebSocket     ← /ws/fare  (live push to dashboard)
-                │
-                ▼
-          Dashboard (dashboard.html)
+```mermaid
+graph LR
+    Dhan["Dhan WebSocket"] -->|ticks| Pool["ConnectionPool<br/>3 x 5,000 slots"]
+    Pool --> Engine["FairEngine<br/>BS + Greeks"]
+    Engine --> API["FastAPI"]
+    API --> Dashboard["Dashboard"]
+    Scrip["Scrip Master<br/>~79k instruments"] -->|resolve| Engine
 ```
 
-## Fair Value Formulas
+See [docs/architecture.md](docs/architecture.md) for full diagrams.
 
-### Options (CE / PE) — Black-Scholes
-```
-d1 = [ln(S/K) + (r + σ²/2)·T] / (σ·√T)
-d2 = d1 - σ·√T
-
-CE fair = S·N(d1) - K·e^(-rT)·N(d2)
-PE fair = K·e^(-rT)·N(-d2) - S·N(-d1)
-
-Implied Volatility → Newton-Raphson solver on market price
-```
-
-### Futures — Cost of Carry
-```
-F_fair = S · e^((r - d)·T)
-
-S = spot price, r = risk-free rate (6.5%), d = dividend yield, T = years to expiry
-```
-
-### Mispricing
-```
-Mispricing ₹   = Market Price − Fair Value
-Mispricing %   = Mispricing / Fair Value × 100
-
-> +1%  → OVERVALUED  → SHORT candidate
-< -1%  → UNDERVALUED → LONG candidate
-```
-
-## Setup
+## Quick Start
 
 ```bash
-# 1. Clone / extract
-cd fno_fare
-
-# 2. Install deps
+# Install
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 3. Configure credentials
-cp .env.example .env
-# Edit .env with your DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN
+# Configure
+echo "DHAN_CLIENT_ID=your_id" > .env
+echo "DHAN_ACCESS_TOKEN=your_token" >> .env
 
-# 4. Seed contracts from Option Chain API (optional — fetches live)
-python seed_contracts.py --underlying NIFTY --atm-range 10
-
-# 5. Start server
-python main.py
-
-# Or with custom options:
-python main.py --contracts contracts.json --port 8000 --interval 30
-
-# Demo mode (no credentials needed — uses simulated data)
-python main.py --demo
+# Run
+python -m src.main
 ```
 
-## API Endpoints
+Dashboard at `http://localhost:8000` | API docs at `http://localhost:8000/docs`
+
+## Docker
+
+```bash
+docker compose up --build
+```
+
+## Fair Value Models
+
+**Options (CE/PE)** — Black-Scholes with Newton-Raphson IV solver + enhanced Greeks (vanna, volga, charm, speed, color, zomma)
+
+**Futures** — Cost of Carry: `F = S * e^((r-d)*T)`
+
+**Mispricing** = Market Price - Theoretical Price
+
+| Signal | Condition | Action |
+|--------|-----------|--------|
+| OVERVALUED | mis% > +1% | SHORT candidate |
+| UNDERVALUED | mis% < -1% | LONG candidate |
+| FAIR | \|mis%\| < 1% | No action |
+
+## Key Features
+
+- **15,000 instrument slots** across 3 WebSocket connections with tiered subscription management
+- **Enhanced Greeks** — vanna, volga, charm, speed, color, zomma
+- **Market structure metrics** — IV rank, IV percentile, moneyness, put-call parity deviation, basis, skew
+- **Auto-resolution** — provide symbol + expiry + strike + type, system resolves all IDs from Dhan scrip master
+- **ATM rotation** — Tier 2 stocks auto-rotate subscriptions as spot price moves
+- **Fuzzy search** — search across ~79,000 instruments with rapidfuzz
+- **Cross-exchange detection** — NSE/BSE cross-listed instruments tagged with spread metric
+- **Interactive dashboard** — tabbed UI with signals, chain view, search, tier config
+
+## API
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/` | Dashboard UI |
-| GET | `/api/fare` | All FareResults sorted by signal strength |
-| GET | `/api/fare/signals?min_pct=2.0` | Only over/undervalued contracts |
-| GET | `/api/fare/{security_id}` | Single contract result |
-| GET | `/api/history/{security_id}` | Historical results |
-| GET | `/api/contracts` | List registered contracts |
-| POST | `/api/contracts/add` | Add new contract dynamically |
-| POST | `/api/intervals` | Set snapshot log interval |
-| WS | `/ws/fare` | Live fare updates stream |
-| GET | `/api/health` | Health check |
-| GET | `/docs` | Swagger UI |
+| GET | `/api/fair` | All results sorted by signal strength |
+| GET | `/api/fair/signals?min_pct=1.0` | Mispriced contracts only |
+| POST | `/api/contracts/add` | Add contract `{symbol, expiry, strike, contract_type}` |
+| GET | `/api/search?q=NIFTY` | Fuzzy search instruments |
+| GET | `/api/tiers` | Tier configuration |
+| WS | `/ws/fair` | Live FairResult stream |
 
-## FareResult Schema
+Full endpoint list in [docs/usage.md](docs/usage.md).
 
-```json
-{
-  "security_id": "42528",
-  "symbol": "NIFTY2350023500CE",
-  "type": "CE",
-  "strike": 23500,
-  "expiry": "2025-04-24",
-  "market_price": 145.5,
-  "fair_value": 138.2,
-  "mispricing": 7.3,
-  "mispricing_pct": 5.28,
-  "signal": "OVERVALUED",
-  "signal_strength": 5.28,
-  "delta": 0.5387,
-  "gamma": 0.00132,
-  "theta": -15.15,
-  "vega": 12.18,
-  "iv": 13.45,
-  "underlying_price": 23512.0,
-  "tte_years": 0.0438,
-  "calculated_at": "2025-04-24T10:30:15"
-}
+## Project Structure
+
+```
+src/
+├── main.py                  # CLI entrypoint
+├── server.py                # FastAPI app + lifespan
+├── config.py                # Settings from .env
+├── core/
+│   ├── models.py            # ContractMeta, Tick, FairResult
+│   └── fair_engine.py       # BS, CoC, Greeks, engine class
+├── feed/
+│   ├── dhan_feed.py         # Dhan SDK wrapper
+│   └── connection_pool.py   # Multi-connection manager
+├── subscription/
+│   ├── slot_tracker.py      # Capacity tracking
+│   ├── tier_config.py       # Tier persistence
+│   └── rotation_manager.py  # ATM rotation
+├── scrip/
+│   └── scrip_master.py      # CSV resolver + cross-listing
+├── search/
+│   └── fuzzy_index.py       # rapidfuzz search
+└── api/
+    ├── schemas.py            # Pydantic models
+    └── routes/               # FastAPI routers
 ```
 
-## Trading Logic
-
-| Signal | Action | Why |
-|--------|--------|-----|
-| OVERVALUED (+) | SHORT | Option premium bloated vs BS theoretical |
-| UNDERVALUED (-) | LONG | Option trading cheap vs BS fair value |
-| FAIR | No action | Within 1% of theoretical price |
-
-> **Note**: Mispricing % threshold (default 1%) is configurable. In liquid NIFTY options,
-> spreads are typically <0.5%, so even 2% mispricing is meaningful.
-> Always validate with market depth (bid/ask spread) before trading.
-
-## Interval Snapshots
-
-The engine prints a table of top signals to terminal every N seconds (default 30s).
-You can change this via API:
+## Testing
 
 ```bash
-curl -X POST http://localhost:8000/api/intervals \
-  -H "Content-Type: application/json" \
-  -d '{"interval_seconds": 15}'
+.venv/bin/python -m pytest tests/ -v
 ```
-
-Or pass `--interval 15` at startup.

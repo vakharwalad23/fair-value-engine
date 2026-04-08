@@ -17,7 +17,7 @@ pip install -r requirements.txt
 # DHAN_ACCESS_TOKEN=...
 
 # Start server
-python main.py --port 8000
+python -m src.main --port 8000
 ```
 
 Run the test suite:
@@ -35,7 +35,7 @@ Dhan SDK MarketFeed (WebSocket)
   → DhanFeedClient (src/feed/dhan_feed.py)          # SDK wrapper, tick callbacks
   → ConnectionPool (src/feed/connection_pool.py)     # Multi-connection slot management
   → FairEngine (src/core/fair_engine.py)             # Black-Scholes/CoC calculations, thread-safe state
-  → FastAPI Server (server.py)                       # REST API + WebSocket broadcast
+  → FastAPI Server (src/server.py)                    # REST API + WebSocket broadcast
   → static/dashboard.html                            # Live browser UI
 ```
 
@@ -50,9 +50,9 @@ Dhan SDK MarketFeed (WebSocket)
 - `src/subscription/tier_config.py` — Persistent JSON config for tier-1/tier-2/tier-3 strike ranges.
 - `src/subscription/rotation_manager.py` — Rotates ATM-window subscriptions as spot price moves.
 - `src/api/routes/` — FastAPI routers: `fair.py`, `contracts.py`, `scrip.py`, `search.py`, `tiers.py`, `health.py`.
-- `server.py` — FastAPI app. Global singletons: `engine`, `pool`, `scrip_master`, `fuzzy_index`, `tier_config`, `rotation_manager`. WebSocket broadcast via `call_soon_threadsafe`.
-- `main.py` — CLI entrypoint. Initialises components and starts uvicorn.
-- `config.py` — Dataclass settings loaded from `.env`. Key vars: `DHAN_CLIENT_ID`, `DHAN_ACCESS_TOKEN`, `FEED_MODE` (TICKER/QUOTE/FULL).
+- `src/server.py` — FastAPI app with lifespan. Global singletons wired to route modules.
+- `src/main.py` — CLI entrypoint. Registers snapshot logger, starts uvicorn.
+- `src/config.py` — Dataclass settings loaded from `.env`. Key vars: `DHAN_CLIENT_ID`, `DHAN_ACCESS_TOKEN`, `MAX_CONNECTIONS`, `SCRIP_CACHE_DIR`.
 
 ## Key Concepts
 
