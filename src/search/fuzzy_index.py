@@ -1,4 +1,5 @@
 """In-memory fuzzy search index over scrip master instruments."""
+import math
 import logging
 
 import pandas as pd
@@ -21,17 +22,24 @@ class FuzzyIndex:
         seen_symbols = set()
 
         for _, row in df.iterrows():
+            strike_raw = row.get("SEM_STRIKE_PRICE")
+            strike = float(strike_raw) if pd.notna(strike_raw) and not (isinstance(strike_raw, float) and math.isnan(strike_raw)) else None
+            lot_raw = row.get("SEM_LOT_UNITS", 1)
+            lot_size = int(lot_raw) if pd.notna(lot_raw) else 1
+            display = row.get("SEM_CUSTOM_SYMBOL")
+            if pd.isna(display):
+                display = row["SEM_TRADING_SYMBOL"]
             entry = {
                 "security_id": str(int(row["SEM_SMST_SECURITY_ID"])),
                 "symbol": str(row["SM_SYMBOL_NAME"]),
                 "trading_symbol": str(row["SEM_TRADING_SYMBOL"]),
-                "display_name": str(row.get("SEM_CUSTOM_SYMBOL", row["SEM_TRADING_SYMBOL"])),
-                "strike": row.get("SEM_STRIKE_PRICE"),
-                "option_type": row.get("SEM_OPTION_TYPE"),
-                "expiry": str(row.get("SEM_EXPIRY_DATE", "")),
-                "exchange": row.get("SEM_EXM_EXCH_ID"),
-                "instrument_type": row.get("SEM_EXCH_INSTRUMENT_TYPE"),
-                "lot_size": int(row.get("SEM_LOT_UNITS", 1)),
+                "display_name": str(display),
+                "strike": strike,
+                "option_type": str(row.get("SEM_OPTION_TYPE", "")) if pd.notna(row.get("SEM_OPTION_TYPE")) else None,
+                "expiry": str(row.get("SEM_EXPIRY_DATE", "")) if pd.notna(row.get("SEM_EXPIRY_DATE")) else None,
+                "exchange": str(row.get("SEM_EXM_EXCH_ID", "")) if pd.notna(row.get("SEM_EXM_EXCH_ID")) else None,
+                "instrument_type": str(row.get("SEM_EXCH_INSTRUMENT_TYPE", "")) if pd.notna(row.get("SEM_EXCH_INSTRUMENT_TYPE")) else None,
+                "lot_size": lot_size,
             }
             self._entries.append(entry)
 
