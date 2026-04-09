@@ -1,5 +1,6 @@
 """Connection pool managing multiple DhanFeedClient instances."""
 import logging
+import threading
 from typing import Callable
 
 from src.core.models import Tick
@@ -14,11 +15,16 @@ class ConnectionPool:
         self._on_tick = on_tick
         self._num_connections = num_connections
         self._instruments_per_connection = instruments_per_connection
+        self._lock = threading.Lock()
         self._clients: list[DhanFeedClient] = []
         self._assignment: dict[str, int] = {}
 
         for i in range(num_connections):
-            client = DhanFeedClient(client_id=client_id, access_token=access_token, on_tick=on_tick, connection_id=i)
+            client = DhanFeedClient(
+                client_id=client_id, access_token=access_token,
+                on_tick=on_tick, connection_id=i,
+                max_instruments=instruments_per_connection,
+            )
             self._clients.append(client)
 
     @property
@@ -41,25 +47,28 @@ class ConnectionPool:
             client.start()
 
     def subscribe(self, security_id: str, exchange_segment: str) -> bool:
-        if security_id in self._assignment:
-            return True
-        best = None
-        best_count = float("inf")
-        for i, client in enumerate(self._clients):
-            if client.available_slots > 0 and client.slot_count < best_count:
-                best = i
-                best_count = client.slot_count
-        if best is None:
-            logger.warning(f"No capacity for {security_id}")
-            return False
-        self._clients[best].subscribe(security_id, exchange_segment)
-        self._assignment[security_id] = best
-        return True
+        with self._lock:
+            if security_id in self._assignment:
+                return True
+            best = None
+            best_count = float("inf")
+            for i, client in enumerate(self._clients):
+                if client.available_slots > 0 and client.slot_count < best_count:
+                    best = i
+                    best_count = client.slot_count
+            if best is None:
+                logger.warning(f"No capacity for {security_id}")
+                return False
+            ok = self._clients[best].subscribe(security_id, exchange_segment)
+            if ok:
+                self._assignment[security_id] = best
+            return ok
 
     def unsubscribe(self, security_id: str, exchange_segment: str):
-        idx = self._assignment.pop(security_id, None)
-        if idx is not None:
-            self._clients[idx].unsubscribe(security_id, exchange_segment)
+        with self._lock:
+            idx = self._assignment.pop(security_id, None)
+            if idx is not None:
+                self._clients[idx].unsubscribe(security_id, exchange_segment)
 
     def subscribe_batch(self, instruments: list[tuple[str, str]]) -> int:
         count = 0
