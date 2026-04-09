@@ -15,6 +15,7 @@ class TierConfig:
         self._lock = threading.Lock()
         self.tier1_underlyings: list[str] = list(DEFAULT_TIER1)
         self.tier2_stocks: list[str] = []
+        self.tier1_expiry_count: int = 2
         self.tier2_atm_range: int = 10
         self.tier2_expiry_count: int = 2
         self.tier3_contracts: list[dict] = []
@@ -27,6 +28,7 @@ class TierConfig:
             data = json.loads(self.config_path.read_text())
             with self._lock:
                 self.tier1_underlyings = data.get("tier1_underlyings", self.tier1_underlyings)
+                self.tier1_expiry_count = data.get("tier1_expiry_count", self.tier1_expiry_count)
                 self.tier2_stocks = data.get("tier2_stocks", self.tier2_stocks)
                 self.tier2_atm_range = data.get("tier2_atm_range", self.tier2_atm_range)
                 self.tier2_expiry_count = data.get("tier2_expiry_count", self.tier2_expiry_count)
@@ -43,6 +45,22 @@ class TierConfig:
         tmp.write_text(json.dumps(data, indent=2))
         tmp.rename(self.config_path)
 
+    def update(self, tier1_underlyings=None, tier2_stocks=None, tier2_atm_range=None,
+               tier2_expiry_count=None, tier1_expiry_count=None):
+        """Atomically update tier configuration fields."""
+        with self._lock:
+            if tier1_underlyings is not None:
+                self.tier1_underlyings = tier1_underlyings
+            if tier2_stocks is not None:
+                self.tier2_stocks = tier2_stocks
+            if tier2_atm_range is not None:
+                self.tier2_atm_range = tier2_atm_range
+            if tier2_expiry_count is not None:
+                self.tier2_expiry_count = tier2_expiry_count
+            if tier1_expiry_count is not None:
+                self.tier1_expiry_count = tier1_expiry_count
+        self.save()
+
     def add_tier3(self, security_id: str, exchange_segment: str):
         entry = {"security_id": security_id, "exchange_segment": exchange_segment}
         with self._lock:
@@ -56,13 +74,19 @@ class TierConfig:
     def to_dict(self, locked: bool = False) -> dict:
         if locked:
             return {
-                "tier1_underlyings": self.tier1_underlyings, "tier2_stocks": self.tier2_stocks,
-                "tier2_atm_range": self.tier2_atm_range, "tier2_expiry_count": self.tier2_expiry_count,
+                "tier1_underlyings": self.tier1_underlyings,
+                "tier1_expiry_count": self.tier1_expiry_count,
+                "tier2_stocks": self.tier2_stocks,
+                "tier2_atm_range": self.tier2_atm_range,
+                "tier2_expiry_count": self.tier2_expiry_count,
                 "tier3_contracts": self.tier3_contracts,
             }
         with self._lock:
             return {
-                "tier1_underlyings": self.tier1_underlyings, "tier2_stocks": self.tier2_stocks,
-                "tier2_atm_range": self.tier2_atm_range, "tier2_expiry_count": self.tier2_expiry_count,
+                "tier1_underlyings": self.tier1_underlyings,
+                "tier1_expiry_count": self.tier1_expiry_count,
+                "tier2_stocks": self.tier2_stocks,
+                "tier2_atm_range": self.tier2_atm_range,
+                "tier2_expiry_count": self.tier2_expiry_count,
                 "tier3_contracts": self.tier3_contracts,
             }

@@ -274,6 +274,18 @@ class FairEngine:
 
             callbacks = list(self._update_callbacks)
 
+            # Check snapshot callbacks
+            now = time.time()
+            snapshot_to_fire: list[tuple[int, Callable]] = []
+            snapshot: list[FairResult] = []
+            for i, (interval, cb, last_fired) in enumerate(self._snapshot_callbacks):
+                if now - last_fired >= interval:
+                    snapshot_to_fire.append((i, cb))
+                    self._snapshot_callbacks[i] = (interval, cb, now)
+
+            if snapshot_to_fire:
+                snapshot = list(self._results.values())
+
         # Emit callbacks outside the lock
         for result in results_to_emit:
             for cb in callbacks:
@@ -281,6 +293,13 @@ class FairEngine:
                     cb(result)
                 except Exception:
                     logger.exception("on_fair_update callback raised")
+
+        # Fire snapshot callbacks outside the lock
+        for _, cb in snapshot_to_fire:
+            try:
+                cb(snapshot)
+            except Exception:
+                logger.exception("on_snapshot callback raised")
 
     def _calculate(self, meta: ContractMeta) -> Optional[FairResult]:
         """Dispatch to future or option calculator."""
@@ -362,7 +381,8 @@ class FairEngine:
             mispricing_pct = 500.0 if mispricing_pct > 0 else -500.0
 
         iv_rank, iv_percentile = self._calc_iv_rank_percentile(meta.security_id, iv) if iv is not None else (None, None)
-        moneyness = self._calc_moneyness(S, K, iv or 0.15, T)
+        moneyness_iv = iv if iv is not None else self._get_latest_iv(meta.security_id)
+        moneyness = self._calc_moneyness(S, K, moneyness_iv, T) if moneyness_iv is not None else None
         intrinsic = self._calc_intrinsic(S, K, meta.contract_type)
         time_val = max(market_price - intrinsic, 0.0)
 
@@ -515,6 +535,14 @@ class FairEngine:
         """Return the ContractMeta for a contract, or None."""
         with self._lock:
             return self._contracts.get(security_id)
+
+    def find_underlying_symbol(self, security_id: str) -> Optional[str]:
+        """Find the underlying symbol for a given security_id by scanning registered contracts."""
+        with self._lock:
+            for meta in self._contracts.values():
+                if meta.underlying_security_id == security_id:
+                    return meta.underlying_symbol
+        return None
 
     def get_all_contracts(self) -> list[ContractMeta]:
         """Return all registered ContractMeta objects."""

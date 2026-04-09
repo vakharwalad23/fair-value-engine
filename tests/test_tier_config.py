@@ -42,5 +42,37 @@ def test_to_dict():
     tc = TierConfig()
     d = tc.to_dict()
     assert "tier1_underlyings" in d
+    assert "tier1_expiry_count" in d
     assert "tier2_stocks" in d
     assert "tier3_contracts" in d
+
+def test_tier1_expiry_count_default():
+    tc = TierConfig()
+    assert tc.tier1_expiry_count == 2
+
+def test_tier1_expiry_count_save_load(tmp_path):
+    path = str(tmp_path / "tier_config.json")
+    tc = TierConfig(config_path=path)
+    tc.tier1_expiry_count = 3
+    tc.save()
+    tc2 = TierConfig(config_path=path)
+    tc2.load()
+    assert tc2.tier1_expiry_count == 3
+
+def test_update_method(tmp_path):
+    path = str(tmp_path / "tier_config.json")
+    tc = TierConfig(config_path=path)
+    tc.update(tier1_underlyings=["NIFTY"], tier2_atm_range=5, tier1_expiry_count=4)
+    assert tc.tier1_underlyings == ["NIFTY"]
+    assert tc.tier2_atm_range == 5
+    assert tc.tier1_expiry_count == 4
+    # Unchanged fields should keep defaults
+    assert tc.tier2_expiry_count == 2
+
+def test_update_partial(tmp_path):
+    path = str(tmp_path / "tier_config.json")
+    tc = TierConfig(config_path=path)
+    original_underlyings = list(tc.tier1_underlyings)
+    tc.update(tier2_stocks=["RELIANCE"])
+    assert tc.tier2_stocks == ["RELIANCE"]
+    assert tc.tier1_underlyings == original_underlyings

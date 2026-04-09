@@ -68,13 +68,13 @@ class RotationManager:
             if not expiries:
                 logger.warning(f"No expiries found for Tier 1 symbol {symbol}")
                 continue
-            for expiry in expiries[:self._tier_config.tier2_expiry_count]:
+            for expiry in expiries[:self._tier_config.tier1_expiry_count]:
                 chain = self._scrip_master.get_chain(symbol, expiry)
                 for meta in chain:
                     meta.tier = 1
                     self._subscribe_contract(meta)
             # Subscribe the underlying instrument so the engine receives spot ticks
-            underlying_sid = self._scrip_master._underlying_map.get(symbol)
+            underlying_sid = self._scrip_master.get_underlying_security_id(symbol)
             if underlying_sid:
                 seg = self._resolve_underlying_segment_for_symbol(symbol)
                 self._pool.subscribe(underlying_sid, seg)
@@ -94,7 +94,7 @@ class RotationManager:
                     meta.tier = 2
                     self._subscribe_contract(meta)
             # Subscribe the underlying instrument so the engine receives spot ticks
-            underlying_sid = self._scrip_master._underlying_map.get(symbol)
+            underlying_sid = self._scrip_master.get_underlying_security_id(symbol)
             if underlying_sid:
                 seg = self._resolve_underlying_segment_for_symbol(symbol)
                 self._pool.subscribe(underlying_sid, seg)
@@ -116,7 +116,7 @@ class RotationManager:
             # Ensure the underlying is also subscribed
             underlying_symbol = entry.get("underlying_symbol")
             if underlying_symbol and underlying_symbol not in subscribed_underlyings:
-                underlying_sid = self._scrip_master._underlying_map.get(underlying_symbol)
+                underlying_sid = self._scrip_master.get_underlying_security_id(underlying_symbol)
                 if underlying_sid:
                     u_seg = self._resolve_underlying_segment_for_symbol(underlying_symbol)
                     self._pool.subscribe(underlying_sid, u_seg)
@@ -130,13 +130,7 @@ class RotationManager:
         and triggers rotation if the ATM bucket has shifted.
         """
         # Identify the symbol associated with this underlying security_id.
-        # We scan the engine's registered contracts for a match.
-        symbol: Optional[str] = None
-        with self._engine._lock:
-            for meta in self._engine._contracts.values():
-                if meta.underlying_security_id == tick.security_id:
-                    symbol = meta.underlying_symbol
-                    break
+        symbol = self._engine.find_underlying_symbol(tick.security_id)
 
         if symbol is None:
             return
@@ -242,16 +236,15 @@ class RotationManager:
                 del self._stale[sid]
 
         for sid in expired:
-            meta = None
-            with self._engine._lock:
-                meta = self._engine._contracts.get(sid)
-            # Never evict Tier 1 contracts
-            if meta is not None and meta.tier == 1:
+            meta = self._engine.get_contract(sid)
+            if meta is None:
                 continue
-            if meta is not None:
-                self._pool.unsubscribe(sid, meta.exchange_segment)
-                self._engine.deregister_contract(sid)
-                self._slot_tracker.remove(sid)
+            # Never evict Tier 1 contracts
+            if meta.tier == 1:
+                continue
+            self._pool.unsubscribe(sid, meta.exchange_segment)
+            self._engine.deregister_contract(sid)
+            self._slot_tracker.remove(sid)
             evicted.append(sid)
             logger.debug(f"Evicted stale contract {sid}")
 

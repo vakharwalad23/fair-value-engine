@@ -51,5 +51,5 @@ def get_fair(security_id: str):
 @router.get("/history/{security_id}")
 def get_history(security_id: str, limit: int = 100):
     eng = _get_engine()
-    history = eng.get_history(security_id)
-    return [_to_response(r) for r in history[-limit:]]
+    history = eng.get_history(security_id, limit=limit)
+    return [_to_response(r) for r in history]

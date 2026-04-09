@@ -124,12 +124,15 @@ class ScripMaster:
         resp.raise_for_status()
         # Atomic download: write to temp file then rename
         fd, tmp_path = tempfile.mkstemp(dir=self._cache_dir, suffix=".csv.tmp")
+        closed = False
         try:
             os.write(fd, resp.content)
             os.close(fd)
+            closed = True
             os.replace(tmp_path, self._cache_path)
         except Exception:
-            os.close(fd) if not os.get_inheritable(fd) else None
+            if not closed:
+                os.close(fd)
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
             raise
@@ -243,6 +246,11 @@ class ScripMaster:
             lot_size=int(row.get("SEM_LOT_UNITS", 1)),
             cross_listed=cross_listed, exchanges=exchanges, peer_security_id=peer_security_id,
         )
+
+    def get_underlying_security_id(self, symbol: str) -> Optional[str]:
+        """Return the security_id for a given underlying symbol, or None."""
+        with self._lock:
+            return self._underlying_map.get(symbol)
 
     def get_expiries(self, symbol: str) -> list[date]:
         with self._lock:

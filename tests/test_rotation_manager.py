@@ -42,8 +42,7 @@ def test_mark_stale():
 
 def test_evict_stale():
     engine = MagicMock()
-    engine._lock = threading.Lock()
-    engine._contracts = {}
+    engine.get_contract.return_value = None
     pool = MagicMock()
     slot_tracker = MagicMock()
     rm = _make_bare_rm(
@@ -53,7 +52,8 @@ def test_evict_stale():
     )
     rm._stale = {"42528": time.time() - 3600}
     evicted = rm._evict_expired_stale()
-    assert "42528" in evicted
+    # meta is None so sid should not be evicted
+    assert "42528" not in evicted
     assert "42528" not in rm._stale
 
 
@@ -64,8 +64,7 @@ def test_evict_stale_skips_tier1():
     meta.exchange_segment = "NSE_FO"
 
     engine = MagicMock()
-    engine._lock = threading.Lock()
-    engine._contracts = {"100": meta}
+    engine.get_contract.return_value = meta
     pool = MagicMock()
     slot_tracker = MagicMock()
 
@@ -104,11 +103,11 @@ def test_apply_tier1_subscribes_underlying():
     scrip_master = MagicMock()
     scrip_master.get_expiries.return_value = ["2026-04-24"]
     scrip_master.get_chain.return_value = []
-    scrip_master._underlying_map = {"NIFTY": "13"}
+    scrip_master.get_underlying_security_id.return_value = "13"
     slot_tracker = MagicMock()
     tier_config = MagicMock()
     tier_config.tier1_underlyings = ["NIFTY"]
-    tier_config.tier2_expiry_count = 2
+    tier_config.tier1_expiry_count = 2
 
     rm = RotationManager(engine, pool, scrip_master, slot_tracker, tier_config)
     rm.apply_tier1()
@@ -125,7 +124,7 @@ def test_apply_tier2_subscribes_underlying():
     scrip_master = MagicMock()
     scrip_master.get_expiries.return_value = ["2026-04-24"]
     scrip_master.get_chain.return_value = []
-    scrip_master._underlying_map = {"RELIANCE": "500325"}
+    scrip_master.get_underlying_security_id.return_value = "500325"
     slot_tracker = MagicMock()
     tier_config = MagicMock()
     tier_config.tier2_stocks = ["RELIANCE"]
