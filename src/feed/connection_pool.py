@@ -43,7 +43,10 @@ class ConnectionPool:
         return [{"connection_id": i, "used": c.slot_count, "capacity": c.MAX_INSTRUMENTS} for i, c in enumerate(self._clients)]
 
     def start(self):
-        for client in self._clients:
+        import time
+        for i, client in enumerate(self._clients):
+            if i > 0:
+                time.sleep(2)  # stagger connections to avoid Dhan rate limiting
             client.start()
 
     def subscribe(self, security_id: str, exchange_segment: str) -> bool:
