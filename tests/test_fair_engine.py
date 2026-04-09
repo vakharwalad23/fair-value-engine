@@ -21,6 +21,8 @@ def test_bs_greeks_present():
 
 def test_bs_degenerate_inputs():
     assert black_scholes(0, 23500, 0.1, 0.065, 0.15, ContractType.CALL) is None
+    assert black_scholes(23500, 0, 0.1, 0.065, 0.15, ContractType.CALL) is None
+    assert black_scholes(23500, -100, 0.1, 0.065, 0.15, ContractType.CALL) is None
     assert black_scholes(23500, 23500, 0, 0.065, 0.15, ContractType.CALL) is None
     assert black_scholes(23500, 23500, 0.1, 0.065, 0, ContractType.CALL) is None
 
@@ -41,8 +43,9 @@ def test_iv_solver_returns_none_for_bad_input():
     assert implied_volatility_newton(100, 23500, 23500, 0, 0.065, ContractType.CALL) is None
 
 def test_vanna_sign():
+    # ATM option with d2 > 0: vanna = -n(d1)*d2/sigma < 0
     result = black_scholes(23500, 23500, 30/365, 0.065, 0.15, ContractType.CALL)
-    assert result["vanna"] > 0
+    assert result["vanna"] < 0
 
 def test_volga_positive():
     result = black_scholes(23500, 23500, 30/365, 0.065, 0.15, ContractType.CALL)

@@ -36,7 +36,7 @@ def black_scholes(
     Returns a dict with price, delta, gamma, vega, theta, vanna, volga,
     charm, speed, color, zomma — or None for degenerate inputs.
     """
-    if S <= 0 or T <= 0 or sigma <= 0:
+    if S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
         return None
 
     sqrt_T = math.sqrt(T)
@@ -78,12 +78,12 @@ def black_scholes(
         theta = (-(S * nd1 * sigma) / (2 * sqrt_T) + r * K * discount * Nd2_neg) / 365
 
     # Enhanced Greeks
-    vanna = nd1 * d2 / sigma
+    vanna = -nd1 * d2 / sigma
     volga = vega_raw * d1 * d2 / sigma
     speed = -(gamma / S) * (1 + d1 / (sigma * sqrt_T))
     color = (
         -nd1 / (2 * S * T * sigma * sqrt_T)
-        * (2 * r * T + 1 + d1 * (2 * r * T - d2 * sigma * sqrt_T) / (sigma * sqrt_T))
+        * (1 + d1 * (2 * r * T - d2 * sigma * sqrt_T) / (sigma * sqrt_T))
         / 365
     )
     zomma = gamma * (d1 * d2 - 1) / sigma
@@ -182,6 +182,9 @@ class FairEngine:
         # (underlying_symbol, expiry, strike) -> {"CE": sid, "PE": sid}
         self._pairs: dict[tuple, dict] = {}
 
+        # underlying_security_id -> set of contract security_ids
+        self._underlying_to_contracts: dict[str, set[str]] = {}
+
         # callbacks registered via on_fair_update
         self._update_callbacks: list[Callable] = []
 
@@ -195,6 +198,7 @@ class FairEngine:
         with self._lock:
             self._contracts[meta.security_id] = meta
             self._history[meta.security_id] = deque(maxlen=self._MAX_HISTORY)
+            self._underlying_to_contracts.setdefault(meta.underlying_security_id, set()).add(meta.security_id)
             if meta.contract_type in (ContractType.CALL, ContractType.PUT) and meta.strike is not None:
                 key = (meta.underlying_symbol, meta.expiry, meta.strike)
                 if key not in self._pairs:
@@ -210,6 +214,12 @@ class FairEngine:
             self._results.pop(security_id, None)
             self._ltp.pop(security_id, None)
             self._iv_history.pop(security_id, None)
+            if meta:
+                underlying_set = self._underlying_to_contracts.get(meta.underlying_security_id)
+                if underlying_set is not None:
+                    underlying_set.discard(security_id)
+                    if not underlying_set:
+                        del self._underlying_to_contracts[meta.underlying_security_id]
             if meta and meta.contract_type in (ContractType.CALL, ContractType.PUT) and meta.strike is not None:
                 key = (meta.underlying_symbol, meta.expiry, meta.strike)
                 pair = self._pairs.get(key, {})
@@ -234,33 +244,22 @@ class FairEngine:
             return
 
         with self._lock:
-            # Check if this is an underlying tick
-            affected_sids = []
-            for sid, meta in self._contracts.items():
-                if meta.underlying_security_id == tick.security_id:
-                    self._underlying_ltp[tick.security_id] = tick.ltp
-                    affected_sids.append(sid)
-                    break
+            is_underlying = tick.security_id in self._underlying_to_contracts
+
+            if is_underlying:
+                self._underlying_ltp[tick.security_id] = tick.ltp
+                # Recalculate all contracts on this underlying that have a known LTP
+                affected_sids = [
+                    sid for sid in self._underlying_to_contracts[tick.security_id]
+                    if sid in self._ltp
+                ]
             else:
                 # It is a contract tick
                 if tick.security_id in self._contracts:
                     self._ltp[tick.security_id] = tick.ltp
-
-            # If underlying updated, recalculate all contracts on that underlying
-            if affected_sids:
-                self._underlying_ltp[tick.security_id] = tick.ltp
-                for sid, meta in self._contracts.items():
-                    if meta.underlying_security_id == tick.security_id and sid in self._ltp:
-                        affected_sids.append(sid) if sid not in affected_sids else None
-                # Rebuild: recalc all contracts with known underlying price
-                affected_sids = [
-                    sid for sid, meta in self._contracts.items()
-                    if meta.underlying_security_id == tick.security_id and sid in self._ltp
-                ]
-            else:
-                # Only recalculate the contract that just updated
-                if tick.security_id in self._contracts:
                     affected_sids = [tick.security_id]
+                else:
+                    affected_sids = []
 
             results_to_emit = []
             for sid in affected_sids:
@@ -273,9 +272,11 @@ class FairEngine:
                     self._history[sid].append(result)
                     results_to_emit.append(result)
 
+            callbacks = list(self._update_callbacks)
+
         # Emit callbacks outside the lock
         for result in results_to_emit:
-            for cb in self._update_callbacks:
+            for cb in callbacks:
                 try:
                     cb(result)
                 except Exception:
@@ -286,6 +287,10 @@ class FairEngine:
         S = self._underlying_ltp.get(meta.underlying_security_id)
         market_price = self._ltp.get(meta.security_id)
         if S is None or market_price is None:
+            return None
+
+        # Skip expired contracts
+        if (meta.expiry - ist_now().date()).days < 0:
             return None
 
         T = time_to_expiry_years(meta.expiry)
@@ -302,6 +307,10 @@ class FairEngine:
         fv = future_fair_value(S, T, r)
         mispricing = market_price - fv
         mispricing_pct = (mispricing / fv * 100) if fv > 0 else 0.0
+        if fv < 1.0:
+            mispricing_pct = 0.0
+        elif abs(mispricing_pct) > 500:
+            mispricing_pct = 500.0 if mispricing_pct > 0 else -500.0
         basis = market_price - S
 
         return FairResult(
@@ -336,8 +345,10 @@ class FairEngine:
             self._update_iv_history(meta.security_id, iv)
             bs = black_scholes(S, K, T, r, iv, meta.contract_type)
         else:
-            # Fall back to a default vol for fair value estimation
-            bs = black_scholes(S, K, T, r, 0.15, meta.contract_type)
+            cached_iv = self._get_latest_iv(meta.security_id)
+            if cached_iv is None:
+                return None
+            bs = black_scholes(S, K, T, r, cached_iv, meta.contract_type)
 
         if bs is None:
             return None
@@ -345,8 +356,12 @@ class FairEngine:
         fv = bs["price"]
         mispricing = market_price - fv
         mispricing_pct = (mispricing / fv * 100) if fv > 0 else 0.0
+        if fv < 1.0:
+            mispricing_pct = 0.0
+        elif abs(mispricing_pct) > 500:
+            mispricing_pct = 500.0 if mispricing_pct > 0 else -500.0
 
-        iv_rank, iv_percentile = self._calc_iv_rank_percentile(meta.security_id, iv) if iv else (None, None)
+        iv_rank, iv_percentile = self._calc_iv_rank_percentile(meta.security_id, iv) if iv is not None else (None, None)
         moneyness = self._calc_moneyness(S, K, iv or 0.15, T)
         intrinsic = self._calc_intrinsic(S, K, meta.contract_type)
         time_val = max(market_price - intrinsic, 0.0)
@@ -393,11 +408,10 @@ class FairEngine:
         """Store one IV entry per calendar day (overwrites same-day entry)."""
         today_str = ist_now().date().isoformat()
         history = self._iv_history.setdefault(security_id, [])
-        # Replace today's entry if it exists, otherwise append
-        for i, (d, _) in enumerate(history):
-            if d == today_str:
-                history[i] = (today_str, iv)
-                return
+        # Check last entry first (most recent) since we only ever update today or append
+        if history and history[-1][0] == today_str:
+            history[-1] = (today_str, iv)
+            return
         history.append((today_str, iv))
         # Keep at most _MAX_HISTORY daily entries
         if len(history) > self._MAX_HISTORY:

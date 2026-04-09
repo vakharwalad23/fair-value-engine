@@ -5,6 +5,8 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Optional
 
+from src.utils.time_utils import ist_now
+
 
 class ContractType(str, Enum):
     CALL = "CE"
@@ -96,11 +98,14 @@ class FairResult:
     calculated_at: str = ""
 
     def __post_init__(self):
-        self.calculated_at = datetime.now().isoformat(timespec="seconds")
-        if abs(self.mispricing_pct) < 1.0:
-            self.signal = "FAIR"
-        elif self.mispricing > 0:
-            self.signal = "OVERVALUED"
-        else:
-            self.signal = "UNDERVALUED"
-        self.signal_strength = abs(self.mispricing_pct)
+        if not self.calculated_at:
+            self.calculated_at = ist_now().isoformat(timespec="seconds")
+        if not self.signal:
+            if abs(self.mispricing_pct) < 1.0:
+                self.signal = "FAIR"
+            elif self.mispricing > 0:
+                self.signal = "OVERVALUED"
+            else:
+                self.signal = "UNDERVALUED"
+        if self.signal_strength == 0.0 and self.mispricing_pct != 0.0:
+            self.signal_strength = abs(self.mispricing_pct)
