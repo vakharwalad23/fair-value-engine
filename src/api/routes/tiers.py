@@ -3,6 +3,7 @@ from src.api.schemas import TierConfigRequest
 
 router = APIRouter(prefix="/api", tags=["tiers"])
 tier_config = None
+rotation_manager = None
 
 
 def _require_tier_config():
@@ -26,4 +27,11 @@ def update_tiers(req: TierConfigRequest):
         tier2_atm_range=req.tier2_atm_range,
         tier2_expiry_count=req.tier2_expiry_count,
     )
+    # Re-apply subscriptions with new config
+    if rotation_manager:
+        try:
+            rotation_manager.apply_tier1()
+            rotation_manager.apply_tier2()
+        except Exception as e:
+            return {"status": "updated_with_errors", "error": str(e), "config": tier_config.to_dict()}
     return {"status": "updated", "config": tier_config.to_dict()}

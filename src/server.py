@@ -118,6 +118,7 @@ async def lifespan(app: FastAPI):
     search_routes.fuzzy_index = fuzzy_index
     search_routes.slot_tracker = slot_tracker
     tier_routes.tier_config = tier_config
+    tier_routes.rotation_manager = rotation_manager
     health_routes.engine = engine
     health_routes.slot_tracker = slot_tracker
     health_routes.connection_pool = connection_pool

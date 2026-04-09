@@ -63,17 +63,18 @@ class ScripMaster:
         self._download_if_stale()
         full_df = pd.read_csv(self._cache_path, low_memory=False)
 
-        # Build underlying lookup from INDEX rows (e.g. NIFTY -> security_id 13)
+        # Build underlying lookup from INDEX + ES (equity) rows
+        # INDEX: NIFTY -> 13, BANKNIFTY -> 25, etc.
+        # ES: RELIANCE -> 2885, TCS -> 11536, etc.
         underlying_map = {}
-        idx_rows = full_df[full_df["SEM_EXCH_INSTRUMENT_TYPE"] == "INDEX"]
-        for _, row in idx_rows.iterrows():
+        ref_rows = full_df[full_df["SEM_EXCH_INSTRUMENT_TYPE"].isin({"INDEX", "ES"})]
+        for _, row in ref_rows.iterrows():
             sym = str(row["SEM_TRADING_SYMBOL"]).strip()
             raw_sid = row["SEM_SMST_SECURITY_ID"]
             if pd.isna(raw_sid):
                 continue
             sid = str(int(raw_sid))
             exch = str(row.get("SEM_EXM_EXCH_ID", "")).strip()
-            # Prefer NSE entries over BSE for underlying map
             if sym not in underlying_map or exch == "NSE":
                 underlying_map[sym] = sid
 
