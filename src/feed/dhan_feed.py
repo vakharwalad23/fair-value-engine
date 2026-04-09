@@ -38,11 +38,13 @@ class DhanFeedClient:
 
     @property
     def slot_count(self) -> int:
-        return len(self._subscribed)
+        with self._lock:
+            return len(self._subscribed)
 
     @property
     def available_slots(self) -> int:
-        return self.MAX_INSTRUMENTS - self.slot_count
+        with self._lock:
+            return self.MAX_INSTRUMENTS - len(self._subscribed)
 
     def start(self):
         if self._thread is not None and self._thread.is_alive():
@@ -117,7 +119,7 @@ class DhanFeedClient:
         with self._lock:
             if pair in self._subscribed:
                 return False
-            if self.slot_count >= self.MAX_INSTRUMENTS:
+            if len(self._subscribed) >= self.MAX_INSTRUMENTS:
                 logger.warning(f"Feed {self._connection_id} at capacity")
                 return False
             self._subscribed.add(pair)

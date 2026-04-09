@@ -21,6 +21,7 @@ def update_tiers(req: TierConfigRequest):
     _require_tier_config()
     tier_config.update(
         tier1_underlyings=req.tier1_underlyings,
+        tier1_expiry_count=req.tier1_expiry_count,
         tier2_stocks=req.tier2_stocks,
         tier2_atm_range=req.tier2_atm_range,
         tier2_expiry_count=req.tier2_expiry_count,

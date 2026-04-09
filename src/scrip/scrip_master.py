@@ -9,7 +9,7 @@ from typing import Optional
 
 import pandas as pd
 
-from src.core.models import ContractMeta, ContractType
+from src.core.models import ContractMeta, ContractType, INDEX_SYMBOLS as _CORE_INDEX_SYMBOLS
 from src.utils.time_utils import ist_now, next_refresh_delay_seconds
 
 logger = logging.getLogger(__name__)
@@ -29,8 +29,7 @@ EXCHANGE_SEGMENT_MAP = {
 
 # Known index symbols -> their INDEX security_id (from scrip master INDEX rows)
 # These are populated dynamically in load() from the INDEX rows
-INDEX_SYMBOLS = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX",
-                 "NIFTYNXT50", "SENSEX50"}
+INDEX_SYMBOLS = _CORE_INDEX_SYMBOLS | {"NIFTYNXT50", "SENSEX50"}
 
 OPTION_TYPE_MAP = {"CE": ContractType.CALL, "PE": ContractType.PUT}
 

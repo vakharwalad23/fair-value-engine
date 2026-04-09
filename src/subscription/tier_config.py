@@ -74,19 +74,19 @@ class TierConfig:
     def to_dict(self, locked: bool = False) -> dict:
         if locked:
             return {
-                "tier1_underlyings": self.tier1_underlyings,
+                "tier1_underlyings": list(self.tier1_underlyings),
                 "tier1_expiry_count": self.tier1_expiry_count,
-                "tier2_stocks": self.tier2_stocks,
+                "tier2_stocks": list(self.tier2_stocks),
                 "tier2_atm_range": self.tier2_atm_range,
                 "tier2_expiry_count": self.tier2_expiry_count,
-                "tier3_contracts": self.tier3_contracts,
+                "tier3_contracts": [dict(c) for c in self.tier3_contracts],
             }
         with self._lock:
             return {
-                "tier1_underlyings": self.tier1_underlyings,
+                "tier1_underlyings": list(self.tier1_underlyings),
                 "tier1_expiry_count": self.tier1_expiry_count,
-                "tier2_stocks": self.tier2_stocks,
+                "tier2_stocks": list(self.tier2_stocks),
                 "tier2_atm_range": self.tier2_atm_range,
                 "tier2_expiry_count": self.tier2_expiry_count,
-                "tier3_contracts": self.tier3_contracts,
+                "tier3_contracts": [dict(c) for c in self.tier3_contracts],
             }

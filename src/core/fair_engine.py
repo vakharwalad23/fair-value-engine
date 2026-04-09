@@ -188,6 +188,9 @@ class FairEngine:
         # callbacks registered via on_fair_update
         self._update_callbacks: list[Callable] = []
 
+        # callbacks registered via on_tick_listener (called for underlying ticks)
+        self._tick_listeners: list[Callable] = []
+
         # (interval_s, callback) pairs registered via on_snapshot
         self._snapshot_callbacks: list[tuple[float, Callable, float]] = []
 
@@ -233,6 +236,11 @@ class FairEngine:
         with self._lock:
             self._update_callbacks.append(callback)
 
+    def on_tick_listener(self, callback: Callable) -> None:
+        """Register a callback invoked with Tick for every underlying tick."""
+        with self._lock:
+            self._tick_listeners.append(callback)
+
     def on_snapshot(self, interval: float, callback: Callable) -> None:
         """Register a periodic snapshot callback (interval in seconds)."""
         with self._lock:
@@ -273,6 +281,7 @@ class FairEngine:
                     results_to_emit.append(result)
 
             callbacks = list(self._update_callbacks)
+            tick_listeners = list(self._tick_listeners) if is_underlying else []
 
             # Check snapshot callbacks
             now = time.time()
@@ -293,6 +302,13 @@ class FairEngine:
                     cb(result)
                 except Exception:
                     logger.exception("on_fair_update callback raised")
+
+        # Notify tick listeners for underlying ticks outside the lock
+        for listener in tick_listeners:
+            try:
+                listener(tick)
+            except Exception:
+                logger.exception("on_tick_listener callback raised")
 
         # Fire snapshot callbacks outside the lock
         for _, cb in snapshot_to_fire:

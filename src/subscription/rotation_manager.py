@@ -5,7 +5,7 @@ import threading
 from typing import Optional
 
 from src.core.fair_engine import FairEngine
-from src.core.models import ContractMeta, ContractType, Tick
+from src.core.models import ContractMeta, ContractType, Tick, INDEX_SYMBOLS
 from src.feed.connection_pool import ConnectionPool
 from src.scrip.scrip_master import ScripMaster
 from src.subscription.slot_tracker import SlotTracker
@@ -18,8 +18,8 @@ _IDX_I = "IDX_I"
 # Segment name for equity underlyings
 _NSE_EQ = "NSE_EQ"
 
-# Index symbols that use IDX_I segment
-_INDEX_SYMBOLS = frozenset({"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"})
+# Alias for convenience
+_INDEX_SYMBOLS = INDEX_SYMBOLS
 
 
 class RotationManager:

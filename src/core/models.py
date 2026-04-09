@@ -8,6 +8,9 @@ from typing import Optional
 from src.utils.time_utils import ist_now
 
 
+INDEX_SYMBOLS = frozenset({"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"})
+
+
 class ContractType(str, Enum):
     CALL = "CE"
     PUT = "PE"

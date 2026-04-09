@@ -1,6 +1,7 @@
 from datetime import date
 from fastapi import APIRouter, HTTPException
 from src.api.schemas import ContractAddRequest, ContractAddResponse
+from src.core.models import INDEX_SYMBOLS
 
 router = APIRouter(prefix="/api", tags=["contracts"])
 engine = None
@@ -64,7 +65,7 @@ def add_contract(req: ContractAddRequest):
     slot_tracker.add(meta.security_id, tier=3)
 
     if not underlying_already:
-        underlying_seg = "IDX_I" if meta.underlying_symbol in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX") else "NSE_EQ"
+        underlying_seg = "IDX_I" if meta.underlying_symbol in INDEX_SYMBOLS else "NSE_EQ"
         connection_pool.subscribe(meta.underlying_security_id, underlying_seg)
         slot_tracker.add(meta.underlying_security_id, tier=3)
 

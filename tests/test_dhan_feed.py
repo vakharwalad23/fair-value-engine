@@ -55,6 +55,7 @@ def test_subscribe_returns_false_at_capacity():
 
 def test_slot_count():
     client = DhanFeedClient.__new__(DhanFeedClient)
+    client._lock = threading.Lock()
     client._subscribed = {("42528", "NSE_FNO"), ("13", "IDX_I")}
     client.MAX_INSTRUMENTS = 5000
     assert client.slot_count == 2

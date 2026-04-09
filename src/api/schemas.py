@@ -69,6 +69,7 @@ class SlotUsageResponse(BaseModel):
 
 class TierConfigRequest(BaseModel):
     tier1_underlyings: Optional[list[str]] = None
+    tier1_expiry_count: Optional[int] = None
     tier2_stocks: Optional[list[str]] = None
     tier2_atm_range: Optional[int] = None
     tier2_expiry_count: Optional[int] = None

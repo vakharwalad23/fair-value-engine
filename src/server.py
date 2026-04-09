@@ -100,6 +100,8 @@ async def lifespan(app: FastAPI):
         rotation_manager.apply_tier2()
         rotation_manager.restore_tier3()
 
+        engine.on_tick_listener(rotation_manager.on_spot_tick)
+
         connection_pool.start()
         logger.info(f"Feed started: {slot_tracker.used} instruments subscribed")
     else:
@@ -163,6 +165,10 @@ async def ws_fair(websocket: WebSocket):
             if data == "ping":
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("WebSocket error")
+    finally:
         async with _ws_lock:
             ws_clients.discard(websocket)
         logger.info(f"WS disconnected. Total: {len(ws_clients)}")
