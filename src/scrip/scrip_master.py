@@ -18,11 +18,18 @@ SCRIP_MASTER_URL = "https://images.dhan.co/api-data/api-scrip-master.csv"
 EXCHANGE_SEGMENT_MAP = {
     ("NSE", "OPTIDX"): "NSE_FNO", ("NSE", "FUTIDX"): "NSE_FNO",
     ("NSE", "OPTSTK"): "NSE_FNO", ("NSE", "FUTSTK"): "NSE_FNO",
+    ("NSE", "OP"): "NSE_FNO", ("NSE", "FUT"): "NSE_FNO",
+    ("NSE", "CUR OP"): "NSE_CURRENCY",
     ("BSE", "OPTIDX"): "BSE_FNO", ("BSE", "FUTIDX"): "BSE_FNO",
     ("BSE", "OPTSTK"): "BSE_FNO", ("BSE", "FUTSTK"): "BSE_FNO",
     ("MCX", "OPTFUT"): "MCX_COMM", ("MCX", "FUTCOM"): "MCX_COMM",
     ("NSE", "OPTCUR"): "NSE_CURRENCY", ("NSE", "FUTCUR"): "NSE_CURRENCY",
 }
+
+# Known index symbols -> their INDEX security_id (from scrip master INDEX rows)
+# These are populated dynamically in load() from the INDEX rows
+INDEX_SYMBOLS = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX",
+                 "NIFTYNXT50", "SENSEX50"}
 
 OPTION_TYPE_MAP = {"CE": ContractType.CALL, "PE": ContractType.PUT}
 
@@ -45,17 +52,39 @@ class ScripMaster:
         self._expiry_index: dict = {}
         self._strike_index: dict = {}
         self._cross_map: dict = {}
+        self._underlying_map: dict = {}
         self._refresh_timer: Optional[threading.Timer] = None
 
     def load(self):
         self._download_if_stale()
-        self._df = pd.read_csv(self._cache_path, low_memory=False)
-        fno_types = {"OPTIDX", "FUTIDX", "OPTSTK", "FUTSTK", "OPTFUT", "FUTCOM", "OPTCUR", "FUTCUR"}
-        self._df = self._df[self._df["SEM_EXCH_INSTRUMENT_TYPE"].isin(fno_types)].copy()
+        full_df = pd.read_csv(self._cache_path, low_memory=False)
+
+        # Build underlying lookup from INDEX rows (e.g. NIFTY -> security_id 13)
+        self._underlying_map = {}
+        idx_rows = full_df[full_df["SEM_EXCH_INSTRUMENT_TYPE"] == "INDEX"]
+        for _, row in idx_rows.iterrows():
+            sym = str(row["SEM_TRADING_SYMBOL"]).strip()
+            sid = str(int(row["SEM_SMST_SECURITY_ID"]))
+            self._underlying_map[sym] = sid
+
+        # Filter to F&O instruments
+        fno_types = {"OPTIDX", "FUTIDX", "OPTSTK", "FUTSTK", "OPTFUT", "FUTCOM",
+                     "OPTCUR", "FUTCUR", "OP", "FUT", "CUR OP"}
+        self._df = full_df[full_df["SEM_EXCH_INSTRUMENT_TYPE"].isin(fno_types)].copy()
+
+        # Parse expiry dates and strikes
         self._df["SEM_EXPIRY_DATE"] = pd.to_datetime(self._df["SEM_EXPIRY_DATE"]).dt.date
         self._df["SEM_STRIKE_PRICE"] = pd.to_numeric(self._df["SEM_STRIKE_PRICE"], errors="coerce").fillna(0)
+
+        # Fill missing SM_SYMBOL_NAME from SEM_TRADING_SYMBOL (e.g. "NIFTY-May2026-30700-CE" -> "NIFTY")
+        mask = self._df["SM_SYMBOL_NAME"].isna()
+        self._df.loc[mask, "SM_SYMBOL_NAME"] = (
+            self._df.loc[mask, "SEM_TRADING_SYMBOL"]
+            .str.split("-", n=1).str[0]
+        )
+
         self._build_index()
-        logger.info(f"Scrip master loaded: {len(self._df)} F&O instruments")
+        logger.info(f"Scrip master loaded: {len(self._df)} F&O instruments, {len(self._underlying_map)} index underlyings")
 
     def _download_if_stale(self):
         if self._cache_path.exists():
@@ -75,6 +104,8 @@ class ScripMaster:
         self._expiry_index = {}
         self._strike_index = {}
         self._cross_map = {}
+        if not hasattr(self, "_underlying_map"):
+            self._underlying_map = {}
 
         for _, row in self._df.iterrows():
             symbol = row["SM_SYMBOL_NAME"]
@@ -89,7 +120,8 @@ class ScripMaster:
             inst_type = row["SEM_EXCH_INSTRUMENT_TYPE"]
             sec_id = str(int(row["SEM_SMST_SECURITY_ID"]))
 
-            if "FUT" in inst_type:
+            is_future = "FUT" in inst_type or (inst_type == "FUT")
+            if is_future or opt_type == "XX":
                 ct_key = "FUT"
                 strike_key = None
             else:
@@ -142,12 +174,20 @@ class ScripMaster:
                 exchanges = sorted(set(p["exchange"] for p in peers))
                 peer_security_id = other_exchanges[0]["security_id"]
 
+        # Derive underlying symbol from the trading symbol (first part before "-")
+        underlying_symbol = symbol
+        underlying_security_id = self._underlying_map.get(underlying_symbol, "")
+
+        display = row.get("SEM_CUSTOM_SYMBOL")
+        if pd.isna(display):
+            display = row["SEM_TRADING_SYMBOL"]
+
         return ContractMeta(
             security_id=sec_id,
-            symbol=str(row.get("SEM_CUSTOM_SYMBOL", row["SEM_TRADING_SYMBOL"])),
+            symbol=str(display),
             contract_type=ct, strike=strike_key, expiry=expiry,
-            underlying_security_id=str(int(row["SEM_UNDERLYING_SECURITY_ID"])),
-            underlying_symbol=str(row["SEM_UNDERLYING_SYMBOL"]),
+            underlying_security_id=underlying_security_id,
+            underlying_symbol=underlying_symbol,
             exchange_segment=exch_segment,
             lot_size=int(row.get("SEM_LOT_UNITS", 1)),
             cross_listed=cross_listed, exchanges=exchanges, peer_security_id=peer_security_id,

@@ -34,16 +34,19 @@ def _make_test_df():
 def test_resolve_option():
     sm = ScripMaster.__new__(ScripMaster)
     sm._df = _make_test_df()
+    sm._underlying_map = {"NIFTY": "13", "RELIANCE": "500325"}
     sm._build_index()
     meta = sm.resolve("NIFTY", date(2026, 4, 24), 23500.0, "CE")
     assert meta.security_id == "42528"
     assert meta.underlying_security_id == "13"
+    assert meta.underlying_symbol == "NIFTY"
     assert meta.lot_size == 25
     assert meta.contract_type.value == "CE"
 
 def test_resolve_future():
     sm = ScripMaster.__new__(ScripMaster)
     sm._df = _make_test_df()
+    sm._underlying_map = {"NIFTY": "13", "RELIANCE": "500325"}
     sm._build_index()
     meta = sm.resolve("NIFTY", date(2026, 4, 24), None, "FUT")
     assert meta.security_id == "42534"
@@ -52,6 +55,7 @@ def test_resolve_future():
 def test_resolve_not_found():
     sm = ScripMaster.__new__(ScripMaster)
     sm._df = _make_test_df()
+    sm._underlying_map = {"NIFTY": "13", "RELIANCE": "500325"}
     sm._build_index()
     try:
         sm.resolve("BANKNIFTY", date(2026, 4, 24), 50000.0, "CE")
@@ -62,6 +66,7 @@ def test_resolve_not_found():
 def test_get_expiries():
     sm = ScripMaster.__new__(ScripMaster)
     sm._df = _make_test_df()
+    sm._underlying_map = {"NIFTY": "13", "RELIANCE": "500325"}
     sm._build_index()
     expiries = sm.get_expiries("NIFTY")
     assert date(2026, 4, 24) in expiries
@@ -69,6 +74,7 @@ def test_get_expiries():
 def test_cross_listing_detection():
     sm = ScripMaster.__new__(ScripMaster)
     sm._df = _make_test_df()
+    sm._underlying_map = {"NIFTY": "13", "RELIANCE": "500325"}
     sm._build_index()
     meta = sm.resolve("RELIANCE", date(2026, 4, 24), 2800.0, "CE")
     assert meta.cross_listed is True
@@ -79,6 +85,7 @@ def test_cross_listing_detection():
 def test_get_all_strikes():
     sm = ScripMaster.__new__(ScripMaster)
     sm._df = _make_test_df()
+    sm._underlying_map = {"NIFTY": "13", "RELIANCE": "500325"}
     sm._build_index()
     strikes = sm.get_strikes("NIFTY", date(2026, 4, 24))
     assert 23500.0 in strikes
