@@ -1,6 +1,7 @@
 """Scrip master CSV download, cache, and contract resolution."""
 import logging
 import os
+import tempfile
 import threading
 from datetime import date, datetime
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Optional
 import pandas as pd
 
 from src.core.models import ContractMeta, ContractType
-from src.utils.time_utils import next_refresh_delay_seconds
+from src.utils.time_utils import ist_now, next_refresh_delay_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,9 @@ INDEX_SYMBOLS = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANK
 
 OPTION_TYPE_MAP = {"CE": ContractType.CALL, "PE": ContractType.PUT}
 
+# Explicit set of futures instrument types to avoid matching OPTFUT etc.
+FUTURES_INST_TYPES = {"FUTIDX", "FUTSTK", "FUTCOM", "FUTCUR", "FUT"}
+
 
 class ContractNotFoundError(Exception):
     pass
@@ -54,43 +58,63 @@ class ScripMaster:
         self._cross_map: dict = {}
         self._underlying_map: dict = {}
         self._refresh_timer: Optional[threading.Timer] = None
+        self._lock = threading.Lock()
 
     def load(self):
         self._download_if_stale()
         full_df = pd.read_csv(self._cache_path, low_memory=False)
 
         # Build underlying lookup from INDEX rows (e.g. NIFTY -> security_id 13)
-        self._underlying_map = {}
+        underlying_map = {}
         idx_rows = full_df[full_df["SEM_EXCH_INSTRUMENT_TYPE"] == "INDEX"]
         for _, row in idx_rows.iterrows():
             sym = str(row["SEM_TRADING_SYMBOL"]).strip()
-            sid = str(int(row["SEM_SMST_SECURITY_ID"]))
-            self._underlying_map[sym] = sid
+            raw_sid = row["SEM_SMST_SECURITY_ID"]
+            if pd.isna(raw_sid):
+                continue
+            sid = str(int(raw_sid))
+            exch = str(row.get("SEM_EXM_EXCH_ID", "")).strip()
+            # Prefer NSE entries over BSE for underlying map
+            if sym not in underlying_map or exch == "NSE":
+                underlying_map[sym] = sid
 
         # Filter to F&O instruments
         fno_types = {"OPTIDX", "FUTIDX", "OPTSTK", "FUTSTK", "OPTFUT", "FUTCOM",
                      "OPTCUR", "FUTCUR", "OP", "FUT", "CUR OP"}
-        self._df = full_df[full_df["SEM_EXCH_INSTRUMENT_TYPE"].isin(fno_types)].copy()
+        df = full_df[full_df["SEM_EXCH_INSTRUMENT_TYPE"].isin(fno_types)].copy()
 
         # Parse expiry dates and strikes
-        self._df["SEM_EXPIRY_DATE"] = pd.to_datetime(self._df["SEM_EXPIRY_DATE"]).dt.date
-        self._df["SEM_STRIKE_PRICE"] = pd.to_numeric(self._df["SEM_STRIKE_PRICE"], errors="coerce").fillna(0)
+        df["SEM_EXPIRY_DATE"] = pd.to_datetime(df["SEM_EXPIRY_DATE"]).dt.date
+        df["SEM_STRIKE_PRICE"] = pd.to_numeric(df["SEM_STRIKE_PRICE"], errors="coerce").fillna(0)
 
         # Normalize SM_SYMBOL_NAME: always derive from SEM_TRADING_SYMBOL
         # BSE uses abbreviated names (BSXOPT, BKXFUT) but trading symbol has
         # human-readable names (SENSEX-May2026-66500-CE). For consistency,
         # always use the trading symbol prefix as the canonical symbol.
-        self._df["SM_SYMBOL_NAME"] = (
-            self._df["SEM_TRADING_SYMBOL"]
+        df["SM_SYMBOL_NAME"] = (
+            df["SEM_TRADING_SYMBOL"]
             .str.split("-", n=1).str[0]
         )
 
-        self._build_index()
-        logger.info(f"Scrip master loaded: {len(self._df)} F&O instruments, {len(self._underlying_map)} index underlyings")
+        # Filter out rows where SM_SYMBOL_NAME is empty or NaN after derivation
+        df = df[df["SM_SYMBOL_NAME"].notna() & (df["SM_SYMBOL_NAME"] != "")]
+
+        # Build indexes into local variables, then swap atomically
+        index, expiry_index, strike_index, cross_map = self._build_index(df)
+
+        with self._lock:
+            self._df = df
+            self._underlying_map = underlying_map
+            self._index = index
+            self._expiry_index = expiry_index
+            self._strike_index = strike_index
+            self._cross_map = cross_map
+
+        logger.info(f"Scrip master loaded: {len(df)} F&O instruments, {len(underlying_map)} index underlyings")
 
     def _download_if_stale(self):
         if self._cache_path.exists():
-            age_hours = (datetime.now().timestamp() - self._cache_path.stat().st_mtime) / 3600
+            age_hours = (ist_now().timestamp() - self._cache_path.stat().st_mtime) / 3600
             if age_hours < 24:
                 logger.info(f"Using cached scrip master ({age_hours:.1f}h old)")
                 return
@@ -98,61 +122,86 @@ class ScripMaster:
         import requests
         resp = requests.get(SCRIP_MASTER_URL, timeout=60)
         resp.raise_for_status()
-        self._cache_path.write_bytes(resp.content)
+        # Atomic download: write to temp file then rename
+        fd, tmp_path = tempfile.mkstemp(dir=self._cache_dir, suffix=".csv.tmp")
+        try:
+            os.write(fd, resp.content)
+            os.close(fd)
+            os.replace(tmp_path, self._cache_path)
+        except Exception:
+            os.close(fd) if not os.get_inheritable(fd) else None
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
         logger.info(f"Scrip master downloaded: {len(resp.content) / 1024 / 1024:.1f} MB")
 
-    def _build_index(self):
-        self._index = {}
-        self._expiry_index = {}
-        self._strike_index = {}
-        self._cross_map = {}
-        if not hasattr(self, "_underlying_map"):
-            self._underlying_map = {}
+    def _build_index(self, df: pd.DataFrame) -> tuple[dict, dict, dict, dict]:
+        index = {}
+        expiry_index = {}
+        strike_index = {}
+        cross_map = {}
 
-        for _, row in self._df.iterrows():
+        for _, row in df.iterrows():
+            raw_sid = row["SEM_SMST_SECURITY_ID"]
+            if pd.isna(raw_sid):
+                continue
+
             symbol = row["SM_SYMBOL_NAME"]
             raw_expiry = row["SEM_EXPIRY_DATE"]
             if isinstance(raw_expiry, str):
                 expiry = datetime.strptime(raw_expiry, "%Y-%m-%d").date()
             else:
                 expiry = raw_expiry
-            strike = float(row["SEM_STRIKE_PRICE"])
+            strike = round(float(row["SEM_STRIKE_PRICE"]), 2)
             opt_type = row["SEM_OPTION_TYPE"]
             exch = row["SEM_EXM_EXCH_ID"]
             inst_type = row["SEM_EXCH_INSTRUMENT_TYPE"]
-            sec_id = str(int(row["SEM_SMST_SECURITY_ID"]))
+            sec_id = str(int(raw_sid))
 
-            is_future = "FUT" in inst_type or (inst_type == "FUT")
-            if is_future or opt_type == "XX":
+            is_future = inst_type in FUTURES_INST_TYPES
+            if is_future:
                 ct_key = "FUT"
                 strike_key = None
-            else:
+            elif opt_type in ("CE", "PE"):
                 ct_key = opt_type
                 strike_key = strike
+            else:
+                # Skip unknown option types (e.g. XX on non-futures)
+                logger.debug(f"Skipping unknown opt_type={opt_type} inst_type={inst_type} sec_id={sec_id}")
+                continue
 
             key = (symbol, expiry, strike_key, ct_key, exch)
-            self._index[key] = row
+            if key in index:
+                logger.debug(f"Index key collision: {key} (existing sec_id={int(index[key]['SEM_SMST_SECURITY_ID'])}, new sec_id={sec_id})")
+            index[key] = row
 
-            self._expiry_index.setdefault(symbol, set()).add(expiry)
+            expiry_index.setdefault(symbol, set()).add(expiry)
 
             if strike_key is not None:
-                self._strike_index.setdefault((symbol, expiry), set()).add(strike_key)
+                strike_index.setdefault((symbol, expiry), set()).add(strike_key)
 
             isin = str(row.get("ISIN", "")).strip()
             if isin and isin != "nan":
-                self._cross_map.setdefault(isin, []).append({
+                cross_map.setdefault(isin, []).append({
                     "security_id": sec_id, "exchange": exch, "key": key,
                 })
 
+        return index, expiry_index, strike_index, cross_map
+
     def resolve(self, symbol: str, expiry: date, strike: Optional[float], contract_type: str) -> ContractMeta:
-        strike_key = None if contract_type == "FUT" else strike
+        strike_key = None if contract_type == "FUT" else round(strike, 2) if strike is not None else None
+
+        with self._lock:
+            index = self._index
+            underlying_map = self._underlying_map
+            cross_map = self._cross_map
 
         row = None
         resolved_exch = None
         for exch in ("NSE", "BSE", "MCX"):
             key = (symbol, expiry, strike_key, contract_type, exch)
-            if key in self._index:
-                row = self._index[key]
+            if key in index:
+                row = index[key]
                 resolved_exch = exch
                 break
 
@@ -168,8 +217,8 @@ class ScripMaster:
         cross_listed = False
         exchanges = [resolved_exch]
         peer_security_id = None
-        if isin and isin != "nan" and isin in self._cross_map:
-            peers = self._cross_map[isin]
+        if isin and isin != "nan" and isin in cross_map:
+            peers = cross_map[isin]
             other_exchanges = [p for p in peers if p["exchange"] != resolved_exch]
             if other_exchanges:
                 cross_listed = True
@@ -178,7 +227,7 @@ class ScripMaster:
 
         # Derive underlying symbol from the trading symbol (first part before "-")
         underlying_symbol = symbol
-        underlying_security_id = self._underlying_map.get(underlying_symbol, "")
+        underlying_security_id = underlying_map.get(underlying_symbol, "")
 
         display = row.get("SEM_CUSTOM_SYMBOL")
         if pd.isna(display):
@@ -196,10 +245,14 @@ class ScripMaster:
         )
 
     def get_expiries(self, symbol: str) -> list[date]:
-        return sorted(self._expiry_index.get(symbol, set()))
+        with self._lock:
+            expiry_index = self._expiry_index
+        return sorted(expiry_index.get(symbol, set()))
 
     def get_strikes(self, symbol: str, expiry: date) -> list[float]:
-        return sorted(self._strike_index.get((symbol, expiry), set()))
+        with self._lock:
+            strike_index = self._strike_index
+        return sorted(strike_index.get((symbol, expiry), set()))
 
     def get_chain(self, symbol: str, expiry: date) -> list[ContractMeta]:
         results = []
@@ -219,7 +272,8 @@ class ScripMaster:
 
     @property
     def dataframe(self) -> pd.DataFrame:
-        return self._df
+        with self._lock:
+            return self._df
 
     def schedule_daily_refresh(self):
         delay = next_refresh_delay_seconds(8, 45)
@@ -230,8 +284,6 @@ class ScripMaster:
 
     def _daily_refresh(self):
         try:
-            if self._cache_path.exists():
-                self._cache_path.unlink()
             self.load()
             logger.info("Scrip master refreshed successfully")
         except Exception as e:
