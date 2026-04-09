@@ -1,7 +1,7 @@
 """Core data models for the F&O Fair Value Engine."""
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date
 from enum import Enum
 from typing import Optional
 

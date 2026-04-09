@@ -2,7 +2,6 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import List
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,43 +34,54 @@ slot_tracker = SlotTracker(total_slots=settings.total_slots)
 tier_config = TierConfig(config_path=f"{settings.SCRIP_CACHE_DIR}/tier_config.json")
 connection_pool = None
 rotation_manager = None
-ws_clients: List[WebSocket] = []
+
+ws_clients: set[WebSocket] = set()
+_ws_lock = asyncio.Lock()
+_event_loop = None
 
 
 async def broadcast_fair(result: FairResult):
     from src.api.routes.fair import _to_response
     msg = _to_response(result)
     dead = []
-    for ws in ws_clients:
+    async with _ws_lock:
+        snapshot = list(ws_clients)
+    for ws in snapshot:
         try:
             await ws.send_json(msg)
         except Exception:
             dead.append(ws)
-    for ws in dead:
-        ws_clients.remove(ws)
+    if dead:
+        async with _ws_lock:
+            for ws in dead:
+                ws_clients.discard(ws)
 
 
 def fair_callback(result: FairResult):
-    try:
-        loop = asyncio.get_event_loop()
-        loop.call_soon_threadsafe(asyncio.ensure_future, broadcast_fair(result))
-    except RuntimeError:
-        pass
-
-
-engine.on_fair_update(fair_callback)
+    if _event_loop and _event_loop.is_running():
+        asyncio.run_coroutine_threadsafe(broadcast_fair(result), _event_loop)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global connection_pool, rotation_manager
+    global connection_pool, rotation_manager, _event_loop
+
+    _event_loop = asyncio.get_running_loop()
+
+    engine.on_fair_update(fair_callback)
 
     logger.info("Loading scrip master...")
-    scrip_master.load()
-    scrip_master.schedule_daily_refresh()
+    try:
+        scrip_master.load()
+        scrip_master.schedule_daily_refresh()
+    except Exception:
+        logger.exception("Failed to load scrip master — starting in degraded mode")
 
     logger.info("Building fuzzy search index...")
-    fuzzy_index.build(scrip_master.dataframe)
+    try:
+        fuzzy_index.build(scrip_master.dataframe)
+    except Exception:
+        logger.exception("Failed to build fuzzy index — search disabled")
 
     if settings.DHAN_CLIENT_ID and settings.DHAN_ACCESS_TOKEN:
         connection_pool = ConnectionPool(
@@ -109,9 +119,10 @@ async def lifespan(app: FastAPI):
     health_routes.engine = engine
     health_routes.slot_tracker = slot_tracker
     health_routes.connection_pool = connection_pool
-    health_routes.ws_clients = ws_clients
 
     yield
+
+    _event_loop = None
 
     if connection_pool:
         connection_pool.stop()
@@ -138,7 +149,8 @@ def index():
 @app.websocket("/ws/fair")
 async def ws_fair(websocket: WebSocket):
     await websocket.accept()
-    ws_clients.append(websocket)
+    async with _ws_lock:
+        ws_clients.add(websocket)
     logger.info(f"WS connected. Total: {len(ws_clients)}")
 
     from src.api.routes.fair import _to_response
@@ -151,5 +163,6 @@ async def ws_fair(websocket: WebSocket):
             if data == "ping":
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
-        ws_clients.remove(websocket)
+        async with _ws_lock:
+            ws_clients.discard(websocket)
         logger.info(f"WS disconnected. Total: {len(ws_clients)}")

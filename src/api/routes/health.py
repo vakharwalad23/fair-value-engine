@@ -1,19 +1,20 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 router = APIRouter(prefix="/api", tags=["health"])
 engine = None
 slot_tracker = None
 connection_pool = None
-ws_clients = None
 
 
 @router.get("/health")
 def health():
+    if engine is None:
+        return {"status": "starting", "contracts_loaded": 0, "fair_results": 0,
+                "ws_clients": 0, "slots_used": 0, "slots_total": 0}
     return {
         "status": "ok",
-        "contracts_loaded": len(engine._contracts),
-        "fair_results": len(engine._results),
-        "ws_clients": len(ws_clients) if ws_clients else 0,
+        "contracts_loaded": engine.contract_count(),
+        "fair_results": engine.result_count(),
         "slots_used": slot_tracker.used,
         "slots_total": slot_tracker.total,
     }
@@ -21,4 +22,6 @@ def health():
 
 @router.get("/slots")
 def get_slots():
+    if connection_pool is None:
+        raise HTTPException(503, "Feed not configured — set DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN")
     return {**slot_tracker.to_dict(), "per_connection": connection_pool.per_connection_usage()}

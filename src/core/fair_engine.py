@@ -511,6 +511,26 @@ class FairEngine:
             return None
         return history[-1][1]
 
+    def get_contract(self, security_id: str) -> Optional[ContractMeta]:
+        """Return the ContractMeta for a contract, or None."""
+        with self._lock:
+            return self._contracts.get(security_id)
+
+    def get_all_contracts(self) -> list[ContractMeta]:
+        """Return all registered ContractMeta objects."""
+        with self._lock:
+            return list(self._contracts.values())
+
+    def contract_count(self) -> int:
+        """Return the number of registered contracts."""
+        with self._lock:
+            return len(self._contracts)
+
+    def result_count(self) -> int:
+        """Return the number of stored fair results."""
+        with self._lock:
+            return len(self._results)
+
     def get_result(self, security_id: str) -> Optional[FairResult]:
         """Return the latest FairResult for a contract, or None."""
         with self._lock:
