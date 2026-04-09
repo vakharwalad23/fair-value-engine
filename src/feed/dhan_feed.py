@@ -64,6 +64,7 @@ class DhanFeedClient:
 
     def _run_forever(self):
         from dhanhq import DhanFeed
+        backoff = 5
         while self._running:
             loop = None
             try:
@@ -82,6 +83,7 @@ class DhanFeedClient:
                     self._feed = feed
                 self._feed.on_ticks = self._handle_tick
                 self._feed.run_forever()
+                backoff = 5  # reset on successful connection
             except Exception as e:
                 logger.error(f"Feed {self._connection_id} error: {e}")
             finally:
@@ -94,8 +96,9 @@ class DhanFeedClient:
                         pass
                 self._loop = None
             if self._running:
-                logger.info(f"Feed {self._connection_id} reconnecting in 5s...")
-                time.sleep(5)
+                logger.info(f"Feed {self._connection_id} reconnecting in {backoff}s...")
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 60)  # exponential backoff, max 60s
 
     def _handle_tick(self, tick_data):
         if isinstance(tick_data, list):
