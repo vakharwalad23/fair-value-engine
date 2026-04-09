@@ -76,10 +76,12 @@ class ScripMaster:
         self._df["SEM_EXPIRY_DATE"] = pd.to_datetime(self._df["SEM_EXPIRY_DATE"]).dt.date
         self._df["SEM_STRIKE_PRICE"] = pd.to_numeric(self._df["SEM_STRIKE_PRICE"], errors="coerce").fillna(0)
 
-        # Fill missing SM_SYMBOL_NAME from SEM_TRADING_SYMBOL (e.g. "NIFTY-May2026-30700-CE" -> "NIFTY")
-        mask = self._df["SM_SYMBOL_NAME"].isna()
-        self._df.loc[mask, "SM_SYMBOL_NAME"] = (
-            self._df.loc[mask, "SEM_TRADING_SYMBOL"]
+        # Normalize SM_SYMBOL_NAME: always derive from SEM_TRADING_SYMBOL
+        # BSE uses abbreviated names (BSXOPT, BKXFUT) but trading symbol has
+        # human-readable names (SENSEX-May2026-66500-CE). For consistency,
+        # always use the trading symbol prefix as the canonical symbol.
+        self._df["SM_SYMBOL_NAME"] = (
+            self._df["SEM_TRADING_SYMBOL"]
             .str.split("-", n=1).str[0]
         )
 
