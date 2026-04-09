@@ -21,7 +21,7 @@ SEGMENT_REVERSE = {v: k for k, v in SEGMENT_MAP.items()}
 # DhanFeed v2 subscription request codes
 REQ_TICKER = 15
 REQ_QUOTE = 17
-REQ_FULL = 21
+REQ_FULL = 15  # v2 uses 15 for all subscription types; server sends Full packets
 
 
 class DhanFeedClient:
