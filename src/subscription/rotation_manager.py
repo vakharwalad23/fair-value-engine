@@ -73,6 +73,12 @@ class RotationManager:
                 for meta in chain:
                     meta.tier = 1
                     self._subscribe_contract(meta)
+            # Subscribe the underlying instrument so the engine receives spot ticks
+            underlying_sid = self._scrip_master._underlying_map.get(symbol)
+            if underlying_sid:
+                seg = self._resolve_underlying_segment_for_symbol(symbol)
+                self._pool.subscribe(underlying_sid, seg)
+                self._slot_tracker.add(underlying_sid, tier=1)
 
     def apply_tier2(self) -> None:
         """Subscribe ATM ± N strikes for each Tier 2 stock across nearest expiries."""
@@ -87,9 +93,16 @@ class RotationManager:
                 for meta in chain:
                     meta.tier = 2
                     self._subscribe_contract(meta)
+            # Subscribe the underlying instrument so the engine receives spot ticks
+            underlying_sid = self._scrip_master._underlying_map.get(symbol)
+            if underlying_sid:
+                seg = self._resolve_underlying_segment_for_symbol(symbol)
+                self._pool.subscribe(underlying_sid, seg)
+                self._slot_tracker.add(underlying_sid, tier=2)
 
     def restore_tier3(self) -> None:
         """Re-subscribe Tier 3 manual one-offs from TierConfig."""
+        subscribed_underlyings: set[str] = set()
         for entry in self._tier_config.tier3_contracts:
             sid = entry.get("security_id")
             seg = entry.get("exchange_segment")
@@ -100,6 +113,15 @@ class RotationManager:
             # registration is skipped for Tier 3 entries that lack full metadata.
             self._pool.subscribe(sid, seg)
             self._slot_tracker.add(sid, 3)
+            # Ensure the underlying is also subscribed
+            underlying_symbol = entry.get("underlying_symbol")
+            if underlying_symbol and underlying_symbol not in subscribed_underlyings:
+                underlying_sid = self._scrip_master._underlying_map.get(underlying_symbol)
+                if underlying_sid:
+                    u_seg = self._resolve_underlying_segment_for_symbol(underlying_symbol)
+                    self._pool.subscribe(underlying_sid, u_seg)
+                    self._slot_tracker.add(underlying_sid, tier=3)
+                    subscribed_underlyings.add(underlying_symbol)
 
     def on_spot_tick(self, tick: Tick) -> None:
         """Called for every underlying spot price tick.
@@ -123,6 +145,8 @@ class RotationManager:
 
     def _check_rotation(self, symbol: str, spot: float) -> None:
         """Rotate subscriptions if ATM has shifted for the given symbol."""
+        if symbol in self._tier_config.tier1_underlyings:
+            return  # Tier 1 is always-on, no rotation
         expiries = self._scrip_master.get_expiries(symbol)
         if not expiries:
             return
@@ -188,14 +212,16 @@ class RotationManager:
             return _IDX_I
         return _NSE_EQ
 
+    @staticmethod
+    def _resolve_underlying_segment_for_symbol(symbol: str) -> str:
+        """Return IDX_I for known index symbols, NSE_EQ for stocks."""
+        if symbol in _INDEX_SYMBOLS:
+            return _IDX_I
+        return _NSE_EQ
+
     def _mark_stale(self, security_id: str) -> None:
         """Record the time at which a contract became stale."""
-        lock = getattr(self, "_lock", None)
-        if lock is not None:
-            with lock:
-                if security_id not in self._stale:
-                    self._stale[security_id] = time.time()
-        else:
+        with self._lock:
             if security_id not in self._stale:
                 self._stale[security_id] = time.time()
 
@@ -207,16 +233,7 @@ class RotationManager:
         now = time.time()
         evicted: list[str] = []
 
-        lock = getattr(self, "_lock", None)
-        if lock is not None:
-            with lock:
-                expired = [
-                    sid for sid, ts in self._stale.items()
-                    if now - ts >= self._stale_ttl
-                ]
-                for sid in expired:
-                    del self._stale[sid]
-        else:
+        with self._lock:
             expired = [
                 sid for sid, ts in self._stale.items()
                 if now - ts >= self._stale_ttl
@@ -224,26 +241,17 @@ class RotationManager:
             for sid in expired:
                 del self._stale[sid]
 
-        pool = getattr(self, "_pool", None)
-        slot_tracker = getattr(self, "_slot_tracker", None)
-        engine = getattr(self, "_engine", None)
-
         for sid in expired:
             meta = None
-            if engine is not None:
-                engine_lock = getattr(engine, "_lock", None)
-                if engine_lock is not None:
-                    with engine_lock:
-                        meta = engine._contracts.get(sid)
-                else:
-                    contracts = getattr(engine, "_contracts", None)
-                    if contracts is not None:
-                        meta = contracts.get(sid)
-            if meta is not None and pool is not None:
-                pool.unsubscribe(sid, meta.exchange_segment)
-                engine.deregister_contract(sid)
-                if slot_tracker is not None:
-                    slot_tracker.remove(sid)
+            with self._engine._lock:
+                meta = self._engine._contracts.get(sid)
+            # Never evict Tier 1 contracts
+            if meta is not None and meta.tier == 1:
+                continue
+            if meta is not None:
+                self._pool.unsubscribe(sid, meta.exchange_segment)
+                self._engine.deregister_contract(sid)
+                self._slot_tracker.remove(sid)
             evicted.append(sid)
             logger.debug(f"Evicted stale contract {sid}")
 
