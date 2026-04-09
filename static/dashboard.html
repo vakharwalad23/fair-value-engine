@@ -650,6 +650,143 @@ select:focus, input[type=number]:focus, input[type=text]:focus {
 .legend-content tbody td:nth-child(2) { color: var(--muted); font-size: 10px; font-family: var(--mono); }
 .legend-content tbody td:nth-child(3) { color: var(--text); }
 
+/* Horizontal scroll for wide tables */
+.table-scroll { overflow-x: auto; }
+
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.pagination button {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.pagination button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.pagination button:disabled { opacity: 0.3; cursor: default; }
+.pagination .page-info { color: var(--text); }
+
+/* Detail Modal */
+.detail-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  z-index: 300;
+  justify-content: center;
+  align-items: center;
+}
+.detail-overlay.open { display: flex; }
+
+.detail-panel {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 640px;
+  max-width: 95vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 0;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.detail-title {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.detail-signal {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 3px;
+}
+.detail-signal.sig-OVERVALUED { background: rgba(255,71,87,0.15); color: var(--red); }
+.detail-signal.sig-UNDERVALUED { background: rgba(0,255,136,0.15); color: var(--green); }
+.detail-signal.sig-FAIR { background: rgba(74,85,104,0.15); color: var(--muted); }
+.detail-close {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  margin-left: 12px;
+}
+.detail-close:hover { border-color: var(--red); color: var(--red); }
+.detail-body { padding: 16px 20px 20px; }
+
+.detail-prices {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  background: var(--bg3);
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.detail-prices span { margin-right: 24px; white-space: nowrap; }
+.detail-prices .label { color: var(--muted); font-size: 11px; }
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+@media (max-width: 600px) { .detail-grid { grid-template-columns: 1fr; } }
+
+.detail-section-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--accent);
+  padding-bottom: 6px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 3px 0;
+}
+.detail-row .dlabel { color: var(--muted); }
+.detail-row .dval { color: var(--text); font-weight: 600; }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
@@ -706,12 +843,25 @@ select:focus, input[type=number]:focus, input[type=text]:focus {
                 <th class="sortable" onclick="signalSort('mispricing_pct')">Mis%</th>
                 <th class="sortable" onclick="signalSort('implied_volatility')">IV</th>
                 <th class="sortable" onclick="signalSort('iv_rank')">IVR</th>
+                <th class="sortable" onclick="signalSort('iv_percentile')">IVP</th>
                 <th class="sortable" onclick="signalSort('delta')">Delta</th>
+                <th class="sortable" onclick="signalSort('gamma')">Gamma</th>
+                <th class="sortable" onclick="signalSort('theta')">Theta</th>
+                <th class="sortable" onclick="signalSort('vega')">Vega</th>
+                <th class="sortable" onclick="signalSort('vanna')">Vanna</th>
+                <th class="sortable" onclick="signalSort('volga')">Volga</th>
+                <th class="sortable" onclick="signalSort('charm')">Charm</th>
+                <th class="sortable" onclick="signalSort('moneyness')">Mness</th>
+                <th class="sortable" onclick="signalSort('intrinsic_value')">Intrinsic</th>
+                <th class="sortable" onclick="signalSort('time_value')">TimeVal</th>
+                <th class="sortable" onclick="signalSort('pc_parity_deviation')">PCPar</th>
+                <th class="sortable" onclick="signalSort('basis')">Basis</th>
+                <th class="sortable" onclick="signalSort('skew')">Skew</th>
                 <th></th>
               </tr>
             </thead>
             <tbody id="overBody">
-              <tr><td colspan="10" class="empty-state">No overvalued contracts</td></tr>
+              <tr><td colspan="23" class="empty-state">No overvalued contracts</td></tr>
             </tbody>
           </table>
         </div>
@@ -732,12 +882,25 @@ select:focus, input[type=number]:focus, input[type=text]:focus {
                 <th class="sortable" onclick="signalSort('mispricing_pct')">Mis%</th>
                 <th class="sortable" onclick="signalSort('implied_volatility')">IV</th>
                 <th class="sortable" onclick="signalSort('iv_rank')">IVR</th>
+                <th class="sortable" onclick="signalSort('iv_percentile')">IVP</th>
                 <th class="sortable" onclick="signalSort('delta')">Delta</th>
+                <th class="sortable" onclick="signalSort('gamma')">Gamma</th>
+                <th class="sortable" onclick="signalSort('theta')">Theta</th>
+                <th class="sortable" onclick="signalSort('vega')">Vega</th>
+                <th class="sortable" onclick="signalSort('vanna')">Vanna</th>
+                <th class="sortable" onclick="signalSort('volga')">Volga</th>
+                <th class="sortable" onclick="signalSort('charm')">Charm</th>
+                <th class="sortable" onclick="signalSort('moneyness')">Mness</th>
+                <th class="sortable" onclick="signalSort('intrinsic_value')">Intrinsic</th>
+                <th class="sortable" onclick="signalSort('time_value')">TimeVal</th>
+                <th class="sortable" onclick="signalSort('pc_parity_deviation')">PCPar</th>
+                <th class="sortable" onclick="signalSort('basis')">Basis</th>
+                <th class="sortable" onclick="signalSort('skew')">Skew</th>
                 <th></th>
               </tr>
             </thead>
             <tbody id="underBody">
-              <tr><td colspan="10" class="empty-state">No undervalued contracts</td></tr>
+              <tr><td colspan="23" class="empty-state">No undervalued contracts</td></tr>
             </tbody>
           </table>
         </div>
@@ -801,15 +964,33 @@ select:focus, input[type=number]:focus, input[type=text]:focus {
             <th class="sortable" onclick="allSort('mispricing_pct')">Mis%</th>
             <th class="sortable" onclick="allSort('implied_volatility')">IV</th>
             <th class="sortable" onclick="allSort('iv_rank')">IVR</th>
+            <th class="sortable" onclick="allSort('iv_percentile')">IVP</th>
             <th class="sortable" onclick="allSort('delta')">Delta</th>
+            <th class="sortable" onclick="allSort('gamma')">Gamma</th>
+            <th class="sortable" onclick="allSort('theta')">Theta</th>
+            <th class="sortable" onclick="allSort('vega')">Vega</th>
+            <th class="sortable" onclick="allSort('vanna')">Vanna</th>
+            <th class="sortable" onclick="allSort('volga')">Volga</th>
+            <th class="sortable" onclick="allSort('charm')">Charm</th>
+            <th class="sortable" onclick="allSort('moneyness')">Mness</th>
+            <th class="sortable" onclick="allSort('intrinsic_value')">Intrinsic</th>
+            <th class="sortable" onclick="allSort('time_value')">TimeVal</th>
+            <th class="sortable" onclick="allSort('pc_parity_deviation')">PCPar</th>
+            <th class="sortable" onclick="allSort('basis')">Basis</th>
+            <th class="sortable" onclick="allSort('skew')">Skew</th>
             <th>Tier</th>
             <th>Exchange</th>
           </tr>
         </thead>
         <tbody id="allBody">
-          <tr><td colspan="12" class="empty-state">Waiting for data...</td></tr>
+          <tr><td colspan="25" class="empty-state">Waiting for data...</td></tr>
         </tbody>
       </table>
+    </div>
+    <div class="pagination" id="allPagination">
+      <button id="allPrevBtn" onclick="allPagePrev()" disabled>&lt; Prev</button>
+      <span class="page-info" id="allPageInfo">Page 1 of 1</span>
+      <button id="allNextBtn" onclick="allPageNext()" disabled>Next &gt;</button>
     </div>
   </div>
 
@@ -937,6 +1118,20 @@ select:focus, input[type=number]:focus, input[type=text]:focus {
   </div>
 </div>
 
+<!-- Detail Modal -->
+<div class="detail-overlay" id="detailOverlay" onclick="closeDetail()">
+  <div class="detail-panel" id="detailPanel" onclick="event.stopPropagation()">
+    <div class="detail-header">
+      <div>
+        <div class="detail-title" id="detailTitle">—</div>
+        <span class="detail-signal" id="detailSignal">—</span>
+      </div>
+      <button class="detail-close" onclick="closeDetail()">&#x2715;</button>
+    </div>
+    <div class="detail-body" id="detailBody"></div>
+  </div>
+</div>
+
 <script>
 // State
 const state = {};
@@ -1057,8 +1252,8 @@ function renderSignals() {
     .filter(d => d.signal === 'UNDERVALUED')
     .sort((a, b) => sortCmp(a, b, signalSortField, signalSortAsc));
 
-  renderSignalTable('overBody', over, 10);
-  renderSignalTable('underBody', under, 10);
+  renderSignalTable('overBody', over, 23);
+  renderSignalTable('underBody', under, 23);
 }
 
 function renderSignalTable(tbodyId, rows, colspan) {
@@ -1069,7 +1264,7 @@ function renderSignalTable(tbodyId, rows, colspan) {
   }
   tbody.innerHTML = rows.map(d => {
     const mc = misColor(d.mispricing);
-    return `<tr>
+    return `<tr style="cursor:pointer" onclick="openDetail('${d.security_id}')">
       <td class="sym">${d.symbol}</td>
       <td class="typ-${d.contract_type}">${d.contract_type}</td>
       <td>${d.strike != null ? fmt(d.strike, 0) : '—'}</td>
@@ -1078,8 +1273,21 @@ function renderSignalTable(tbodyId, rows, colspan) {
       <td style="color:${mc}">${fmtPct(d.mispricing_pct)}</td>
       <td>${d.implied_volatility != null ? fmt(d.implied_volatility) + '%' : '—'}</td>
       <td>${d.iv_rank != null ? fmt(d.iv_rank, 2) : '—'}</td>
+      <td>${d.iv_percentile != null ? fmt(d.iv_percentile, 2) : '—'}</td>
       <td>${d.delta != null ? fmt(d.delta, 4) : '—'}</td>
-      <td><button class="btn-unsub" onclick="unsubscribe('${d.security_id}')">x</button></td>
+      <td>${d.gamma != null ? fmt(d.gamma, 4) : '—'}</td>
+      <td>${fmt(d.theta)}</td>
+      <td>${fmt(d.vega)}</td>
+      <td>${d.vanna != null ? fmt(d.vanna, 4) : '—'}</td>
+      <td>${d.volga != null ? fmt(d.volga, 4) : '—'}</td>
+      <td>${d.charm != null ? fmt(d.charm, 4) : '—'}</td>
+      <td>${d.moneyness != null ? fmt(d.moneyness, 3) : '—'}</td>
+      <td>${fmt(d.intrinsic_value)}</td>
+      <td>${fmt(d.time_value)}</td>
+      <td>${d.pc_parity_deviation != null ? fmt(d.pc_parity_deviation) : '—'}</td>
+      <td>${d.basis != null ? fmt(d.basis) : '—'}</td>
+      <td>${d.skew != null ? fmt(d.skew) : '—'}</td>
+      <td><button class="btn-unsub" onclick="event.stopPropagation(); unsubscribe('${d.security_id}')">x</button></td>
     </tr>`;
   }).join('');
 }
@@ -1186,7 +1394,7 @@ function renderUnderlying() {
     const mc = misColor(d.mispricing);
     const staleClass = d.stale ? ' stale-row' : '';
     const staleTag = d.stale ? ' <span class="badge badge-stale">stale</span>' : '';
-    return `<tr class="${staleClass}">
+    return `<tr class="${staleClass}" style="cursor:pointer" onclick="openDetail('${d.security_id}')">
       <td class="sym">${d.symbol}${staleTag}</td>
       <td class="typ-${d.contract_type}">${d.contract_type}</td>
       <td>${d.strike != null ? fmt(d.strike, 0) : '—'}</td>
@@ -1207,6 +1415,9 @@ function allSort(field) {
   renderAll();
 }
 
+let allCurrentPage = 1;
+const ALL_PAGE_SIZE = 50;
+
 function renderAll() {
   const tbody = document.getElementById('allBody');
   const allCount = document.getElementById('allCount');
@@ -1217,11 +1428,19 @@ function renderAll() {
   allCount.textContent = rows.length;
 
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="12" class="empty-state">Waiting for data...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="25" class="empty-state">Waiting for data...</td></tr>';
+    updateAllPagination(0);
     return;
   }
 
-  tbody.innerHTML = rows.map(d => {
+  const totalPages = Math.ceil(rows.length / ALL_PAGE_SIZE);
+  if (allCurrentPage > totalPages) allCurrentPage = totalPages;
+  if (allCurrentPage < 1) allCurrentPage = 1;
+
+  const start = (allCurrentPage - 1) * ALL_PAGE_SIZE;
+  const pageRows = rows.slice(start, start + ALL_PAGE_SIZE);
+
+  tbody.innerHTML = pageRows.map(d => {
     const mc = misColor(d.mispricing);
     const tierBadge = d.tier ? `<span class="badge badge-t${d.tier}">T${d.tier}</span>` : '—';
     const exchBadge = d.cross_listed
@@ -1229,7 +1448,7 @@ function renderAll() {
       : (d.exchanges && d.exchanges.length ? d.exchanges[0] : '—');
     const staleClass = d.stale ? ' stale-row' : '';
     const staleTag = d.stale ? ' <span class="badge badge-stale">stale</span>' : '';
-    return `<tr class="${staleClass}">
+    return `<tr class="${staleClass}" style="cursor:pointer" onclick="openDetail('${d.security_id}')">
       <td class="sym">${d.symbol}${staleTag}</td>
       <td class="typ-${d.contract_type}">${d.contract_type}</td>
       <td>${d.strike != null ? fmt(d.strike, 0) : '—'}</td>
@@ -1239,11 +1458,42 @@ function renderAll() {
       <td style="color:${mc}">${fmtPct(d.mispricing_pct)}</td>
       <td>${d.implied_volatility != null ? fmt(d.implied_volatility) + '%' : '—'}</td>
       <td>${d.iv_rank != null ? fmt(d.iv_rank, 2) : '—'}</td>
+      <td>${d.iv_percentile != null ? fmt(d.iv_percentile, 2) : '—'}</td>
       <td>${d.delta != null ? fmt(d.delta, 4) : '—'}</td>
+      <td>${d.gamma != null ? fmt(d.gamma, 4) : '—'}</td>
+      <td>${fmt(d.theta)}</td>
+      <td>${fmt(d.vega)}</td>
+      <td>${d.vanna != null ? fmt(d.vanna, 4) : '—'}</td>
+      <td>${d.volga != null ? fmt(d.volga, 4) : '—'}</td>
+      <td>${d.charm != null ? fmt(d.charm, 4) : '—'}</td>
+      <td>${d.moneyness != null ? fmt(d.moneyness, 3) : '—'}</td>
+      <td>${fmt(d.intrinsic_value)}</td>
+      <td>${fmt(d.time_value)}</td>
+      <td>${d.pc_parity_deviation != null ? fmt(d.pc_parity_deviation) : '—'}</td>
+      <td>${d.basis != null ? fmt(d.basis) : '—'}</td>
+      <td>${d.skew != null ? fmt(d.skew) : '—'}</td>
       <td>${tierBadge}</td>
       <td>${exchBadge}</td>
     </tr>`;
   }).join('');
+
+  updateAllPagination(rows.length);
+}
+
+function updateAllPagination(total) {
+  const totalPages = Math.max(1, Math.ceil(total / ALL_PAGE_SIZE));
+  document.getElementById('allPageInfo').textContent = `Page ${allCurrentPage} of ${totalPages}`;
+  document.getElementById('allPrevBtn').disabled = allCurrentPage <= 1;
+  document.getElementById('allNextBtn').disabled = allCurrentPage >= totalPages;
+}
+
+function allPagePrev() {
+  if (allCurrentPage > 1) { allCurrentPage--; renderAll(); }
+}
+
+function allPageNext() {
+  const totalPages = Math.ceil(Object.keys(state).length / ALL_PAGE_SIZE);
+  if (allCurrentPage < totalPages) { allCurrentPage++; renderAll(); }
 }
 
 // Search Tab
@@ -1306,7 +1556,7 @@ function renderSearch(results) {
     } else {
       actionCell = `
         <div>
-          <button class="btn-subscribe" onclick="subscribe('${r.symbol}','${r.expiry || ''}','${r.strike || ''}','${r.contract_type || ''}', this)">
+          <button class="btn-subscribe" onclick="subscribe('${r.symbol}','${r.expiry || ''}','${r.strike != null && r.strike != 0 ? r.strike : ''}','${r.option_type || ''}', this)">
             + Subscribe
           </button>
           <span class="slot-hint">uses ${slotCost} slot${slotCost !== 1 ? 's' : ''}</span>
@@ -1332,7 +1582,8 @@ async function subscribe(symbol, expiry, strike, contractType, btn) {
     btn.textContent = 'Adding...';
   }
   try {
-    const body = { symbol, expiry, strike: strike ? parseFloat(strike) : null, contract_type: contractType };
+    const ct = contractType === 'XX' ? 'FUT' : contractType;
+    const body = { symbol, expiry, strike: strike !== '' && strike !== null && strike !== undefined ? parseFloat(strike) : null, contract_type: ct };
     const resp = await fetch('/api/contracts/add', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1459,6 +1710,103 @@ async function saveTierConfig() {
     alert('Save error: ' + err.message);
   }
 }
+
+// Detail Modal
+function openDetail(secId) {
+  const d = state[secId];
+  if (!d) return;
+
+  const titleParts = [d.symbol];
+  if (d.expiry) titleParts.push(d.expiry);
+  if (d.strike != null && d.contract_type !== 'FUT') titleParts.push(fmt(d.strike, 0));
+  if (d.contract_type) titleParts.push(d.contract_type);
+
+  document.getElementById('detailTitle').textContent = titleParts.join('  ');
+
+  const sigEl = document.getElementById('detailSignal');
+  const sigText = d.signal || 'FAIR';
+  const misPctText = d.mispricing_pct != null ? ' ' + fmtPct(d.mispricing_pct) : '';
+  sigEl.textContent = sigText + misPctText;
+  sigEl.className = 'detail-signal sig-' + sigText;
+
+  const body = document.getElementById('detailBody');
+  body.innerHTML = `
+    <div class="detail-prices">
+      <span><span class="label">Market:</span> ${fmt(d.market_price)}</span>
+      <span><span class="label">Fair:</span> ${fmt(d.fair_value)}</span>
+      <span><span class="label">Mis:</span> <span style="color:${misColor(d.mispricing)}">${d.mispricing != null ? (d.mispricing >= 0 ? '+' : '') + fmt(d.mispricing) : '—'}</span></span>
+    </div>
+    <div class="detail-grid">
+      <div>
+        <div class="detail-section-title">Standard Greeks</div>
+        ${detailRow('Delta', d.delta, 4)}
+        ${detailRow('Gamma', d.gamma, 4)}
+        ${detailRow('Theta', d.theta, 2)}
+        ${detailRow('Vega', d.vega, 2)}
+      </div>
+      <div>
+        <div class="detail-section-title">Enhanced Greeks</div>
+        ${detailRow('Vanna', d.vanna, 4)}
+        ${detailRow('Volga', d.volga, 4)}
+        ${detailRow('Charm', d.charm, 4)}
+        ${detailRow('Speed', d.speed, 6)}
+        ${detailRow('Color', d.color, 6)}
+        ${detailRow('Zomma', d.zomma, 4)}
+      </div>
+    </div>
+    <div class="detail-grid">
+      <div>
+        <div class="detail-section-title">Volatility</div>
+        ${detailRow('IV', d.implied_volatility, 2, '%')}
+        ${detailRow('IV Rank', d.iv_rank, 2)}
+        ${detailRow('IV Percentile', d.iv_percentile, 2)}
+      </div>
+      <div>
+        <div class="detail-section-title">Market Structure</div>
+        ${detailRow('Moneyness', d.moneyness, 3)}
+        ${detailRow('Intrinsic', d.intrinsic_value, 2)}
+        ${detailRow('Time Value', d.time_value, 2)}
+      </div>
+    </div>
+    <div class="detail-grid">
+      <div>
+        <div class="detail-section-title">Relative Value</div>
+        ${detailRow('PC Parity Dev', d.pc_parity_deviation, 2)}
+        ${detailRow('Basis', d.basis, 2)}
+        ${detailRow('Skew', d.skew, 2)}
+      </div>
+      <div>
+        <div class="detail-section-title">Contract Info</div>
+        ${detailRow('Security ID', d.security_id, 0, '', true)}
+        ${detailRow('Expiry', d.expiry || '—', 0, '', true)}
+        ${detailRow('Tier', d.tier ? 'T' + d.tier : '—', 0, '', true)}
+        ${detailRow('Stale', d.stale ? 'Yes' : 'No', 0, '', true)}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('detailOverlay').classList.add('open');
+}
+
+function detailRow(label, value, dec, suffix, isStr) {
+  let display;
+  if (isStr) {
+    display = value != null ? String(value) : '—';
+  } else {
+    display = value != null && !isNaN(value) ? fmt(value, dec) + (suffix || '') : '—';
+  }
+  return `<div class="detail-row"><span class="dlabel">${label}</span><span class="dval">${display}</span></div>`;
+}
+
+function closeDetail() {
+  document.getElementById('detailOverlay').classList.remove('open');
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    document.getElementById('detailOverlay').classList.remove('open');
+  }
+});
 
 // Metrics Legend
 function toggleLegend() {
