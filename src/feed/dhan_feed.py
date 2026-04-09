@@ -9,12 +9,19 @@ from src.core.models import Tick
 
 logger = logging.getLogger(__name__)
 
+# Exchange segment string -> Dhan SDK integer code
+# Must match DhanFeed.get_exchange_segment() in dhanhq SDK
 SEGMENT_MAP = {
-    "NSE_EQ": 1, "NSE_FNO": 2, "NSE_CURRENCY": 3,
-    "BSE_EQ": 4, "BSE_FNO": 5, "MCX_COMM": 7, "IDX_I": 13,
+    "IDX_I": 0, "NSE_EQ": 1, "NSE_FNO": 2, "NSE_CURRENCY": 3,
+    "BSE_EQ": 4, "MCX_COMM": 5, "BSE_CURRENCY": 7, "BSE_FNO": 8,
 }
 
 SEGMENT_REVERSE = {v: k for k, v in SEGMENT_MAP.items()}
+
+# DhanFeed v2 subscription request codes
+REQ_TICKER = 15
+REQ_QUOTE = 17
+REQ_FULL = 21
 
 
 class DhanFeedClient:
@@ -69,6 +76,7 @@ class DhanFeedClient:
                     client_id=self._client_id,
                     access_token=self._access_token,
                     instruments=instruments,
+                    version='v2',
                 )
                 with self._lock:
                     self._feed = feed
@@ -125,7 +133,7 @@ class DhanFeedClient:
             self._subscribed.add(pair)
             if self._feed:
                 seg_code = SEGMENT_MAP.get(exchange_segment, 2)
-                self._feed.subscribe_symbols([(seg_code, str(security_id))])
+                self._feed.subscribe_symbols([(seg_code, str(security_id), REQ_FULL)])
         return True
 
     def unsubscribe(self, security_id: str, exchange_segment: str):
@@ -134,10 +142,10 @@ class DhanFeedClient:
             self._subscribed.discard(pair)
             if self._feed:
                 seg_code = SEGMENT_MAP.get(exchange_segment, 2)
-                self._feed.unsubscribe_symbols([(seg_code, str(security_id))])
+                self._feed.unsubscribe_symbols([(seg_code, str(security_id), REQ_FULL)])
 
-    def _build_instrument_list(self, pairs: list[tuple[str, str]]) -> list[tuple[int, str]]:
-        return [(SEGMENT_MAP.get(seg, 2), sid) for sid, seg in pairs]
+    def _build_instrument_list(self, pairs: list[tuple[str, str]]) -> list[tuple[int, str, int]]:
+        return [(SEGMENT_MAP.get(seg, 2), sid, REQ_FULL) for sid, seg in pairs]
 
     def stop(self):
         self._running = False
