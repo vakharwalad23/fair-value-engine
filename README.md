@@ -10,7 +10,7 @@ graph LR
     Pool --> Engine["FairEngine<br/>BS + Greeks"]
     Engine --> API["FastAPI"]
     API --> Dashboard["Dashboard"]
-    Scrip["Scrip Master<br/>~79k instruments"] -->|resolve| Engine
+    Scrip["Scrip Master<br/>~225k instruments"] -->|resolve| Engine
 ```
 
 See [docs/architecture.md](docs/architecture.md) for full diagrams.
@@ -23,8 +23,8 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 # Configure
-echo "DHAN_CLIENT_ID=your_id" > .env
-echo "DHAN_ACCESS_TOKEN=your_token" >> .env
+cp .env.example .env
+# Edit .env with your Dhan credentials
 
 # Run
 python -m src.main
@@ -38,13 +38,21 @@ Dashboard at `http://localhost:8000` | API docs at `http://localhost:8000/docs`
 docker compose up --build
 ```
 
+## What Happens on Startup
+
+1. Downloads Dhan scrip master CSV (~225k instruments, cached 24h)
+2. Builds fuzzy search index over all F&O instruments
+3. Opens 3 WebSocket connections (15,000 instrument slots total)
+4. Subscribes Tier 1 index chains (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, SENSEX, BANKEX) + their underlyings
+5. Starts receiving live ticks, calculating fair values in real-time
+
 ## Fair Value Models
 
-**Options (CE/PE)** — Black-Scholes with Newton-Raphson IV solver + enhanced Greeks (vanna, volga, charm, speed, color, zomma)
+**Options (CE/PE)** -- Black-Scholes with Newton-Raphson IV solver + enhanced Greeks (vanna, volga, charm, speed, color, zomma)
 
-**Futures** — Cost of Carry: `F = S * e^((r-d)*T)`
+**Futures** -- Cost of Carry: `F = S * e^((r-d)*T)`
 
-**Mispricing** = Market Price - Theoretical Price
+**Mispricing** = Market Price - Theoretical Price (clamped to +/-500%)
 
 | Signal | Condition | Action |
 |--------|-----------|--------|
@@ -55,13 +63,25 @@ docker compose up --build
 ## Key Features
 
 - **15,000 instrument slots** across 3 WebSocket connections with tiered subscription management
-- **Enhanced Greeks** — vanna, volga, charm, speed, color, zomma
-- **Market structure metrics** — IV rank, IV percentile, moneyness, put-call parity deviation, basis, skew
-- **Auto-resolution** — provide symbol + expiry + strike + type, system resolves all IDs from Dhan scrip master
-- **ATM rotation** — Tier 2 stocks auto-rotate subscriptions as spot price moves
-- **Fuzzy search** — search across ~79,000 instruments with rapidfuzz
-- **Cross-exchange detection** — NSE/BSE cross-listed instruments tagged with spread metric
-- **Interactive dashboard** — tabbed UI with signals, chain view, search, tier config
+- **Enhanced Greeks** -- vanna, volga, charm, speed, color, zomma
+- **Market structure metrics** -- IV rank, IV percentile, moneyness, put-call parity deviation, basis, skew
+- **Auto-resolution** -- provide symbol + expiry + strike + type, system resolves all IDs from Dhan scrip master
+- **Underlying auto-subscription** -- when subscribing derivatives, the underlying index/equity is automatically subscribed too
+- **ATM rotation** -- Tier 2 stocks auto-rotate subscriptions as spot price moves
+- **Fuzzy search** -- search across all F&O instruments with rapidfuzz
+- **Cross-exchange detection** -- NSE/BSE cross-listed instruments tagged with spread metric
+- **Thread safety** -- all shared state protected by locks, atomic index swaps, safe async broadcast
+- **Interactive dashboard** -- tabbed UI with signals, chain view, search, tier config
+
+## Tier System
+
+| Tier | Description | Rotation |
+|------|-------------|----------|
+| 1 | Index full chains (NIFTY, BANKNIFTY, etc.) | None -- always subscribed |
+| 2 | ATM-centric stocks | Auto-rotates as spot moves |
+| 3 | Manual one-offs via dashboard/API | None |
+
+Configure via dashboard Tier Config panel or `POST /api/tiers`.
 
 ## API
 
@@ -72,6 +92,7 @@ docker compose up --build
 | POST | `/api/contracts/add` | Add contract `{symbol, expiry, strike, contract_type}` |
 | GET | `/api/search?q=NIFTY` | Fuzzy search instruments |
 | GET | `/api/tiers` | Tier configuration |
+| GET | `/api/slots` | Slot usage breakdown |
 | WS | `/ws/fair` | Live FairResult stream |
 
 Full endpoint list in [docs/usage.md](docs/usage.md).
@@ -87,11 +108,11 @@ src/
 │   ├── models.py            # ContractMeta, Tick, FairResult
 │   └── fair_engine.py       # BS, CoC, Greeks, engine class
 ├── feed/
-│   ├── dhan_feed.py         # Dhan SDK wrapper
+│   ├── dhan_feed.py         # Dhan SDK wrapper (DhanFeed)
 │   └── connection_pool.py   # Multi-connection manager
 ├── subscription/
 │   ├── slot_tracker.py      # Capacity tracking
-│   ├── tier_config.py       # Tier persistence
+│   ├── tier_config.py       # Tier persistence (JSON)
 │   └── rotation_manager.py  # ATM rotation
 ├── scrip/
 │   └── scrip_master.py      # CSV resolver + cross-listing
@@ -106,4 +127,5 @@ src/
 
 ```bash
 .venv/bin/python -m pytest tests/ -v
+# 91 tests covering math, scrip resolution, feed, subscriptions, API routes
 ```
