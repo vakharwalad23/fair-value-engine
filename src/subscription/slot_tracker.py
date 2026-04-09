@@ -29,6 +29,10 @@ class SlotTracker:
         with self._lock:
             self._slots.pop(security_id, None)
 
+    def contains(self, security_id: str) -> bool:
+        with self._lock:
+            return security_id in self._slots
+
     def per_tier(self) -> dict[int, int]:
         with self._lock:
             counts = {1: 0, 2: 0, 3: 0}
@@ -37,11 +41,18 @@ class SlotTracker:
             return counts
 
     def forecast(self, new_count: int) -> dict:
-        available = self.available
-        return {
-            "slots_needed": new_count, "slots_used": self.used,
-            "slots_after": available - new_count, "fits": new_count <= available,
-        }
+        with self._lock:
+            used = len(self._slots)
+            available = self._total - used
+            return {
+                "slots_needed": new_count, "slots_used": used,
+                "slots_after": available - new_count, "fits": new_count <= available,
+            }
 
     def to_dict(self) -> dict:
-        return {"used": self.used, "total": self._total, "available": self.available, "per_tier": self.per_tier()}
+        with self._lock:
+            used = len(self._slots)
+            counts = {1: 0, 2: 0, 3: 0}
+            for tier in self._slots.values():
+                counts[tier] = counts.get(tier, 0) + 1
+            return {"used": used, "total": self._total, "available": self._total - used, "per_tier": counts}
