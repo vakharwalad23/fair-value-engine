@@ -73,6 +73,10 @@ class DhanFeedClient:
                 self._loop = loop
                 with self._lock:
                     instruments = self._build_instrument_list(list(self._subscribed))
+                if not instruments:
+                    logger.info(f"Feed {self._connection_id} has no instruments, waiting...")
+                    time.sleep(5)
+                    continue
                 feed = DhanFeed(
                     client_id=self._client_id,
                     access_token=self._access_token,
@@ -81,9 +85,18 @@ class DhanFeedClient:
                 )
                 with self._lock:
                     self._feed = feed
-                self._feed.on_ticks = self._handle_tick
-                self._feed.run_forever()
-                backoff = 5  # reset on successful connection
+                # v2 SDK: connect + subscribe, then poll for data
+                feed.run_forever()  # connects and subscribes
+                logger.info(f"Feed {self._connection_id} connected, receiving ticks...")
+                backoff = 5
+                while self._running:
+                    try:
+                        data = feed.get_data()
+                        if data:
+                            self._handle_tick(data)
+                    except Exception as e:
+                        logger.warning(f"Feed {self._connection_id} recv error: {e}")
+                        break
             except Exception as e:
                 logger.error(f"Feed {self._connection_id} error: {e}")
             finally:
@@ -98,7 +111,7 @@ class DhanFeedClient:
             if self._running:
                 logger.info(f"Feed {self._connection_id} reconnecting in {backoff}s...")
                 time.sleep(backoff)
-                backoff = min(backoff * 2, 60)  # exponential backoff, max 60s
+                backoff = min(backoff * 2, 60)
 
     def _handle_tick(self, tick_data):
         if isinstance(tick_data, list):

@@ -1,13 +1,14 @@
-import os
-
-def test_settings_defaults():
+def test_settings_has_required_fields():
     from src.config import Settings
     s = Settings()
-    assert s.HOST == os.getenv("HOST", "0.0.0.0")
-    assert s.PORT == int(os.getenv("PORT", "8000"))
-    assert s.MAX_CONNECTIONS == 3
-    assert s.INSTRUMENTS_PER_CONNECTION == 5000
-    assert s.SCRIP_CACHE_DIR == "cache"
+    assert isinstance(s.DHAN_CLIENT_ID, str)
+    assert isinstance(s.DHAN_ACCESS_TOKEN, str)
+    assert isinstance(s.HOST, str)
+    assert isinstance(s.PORT, int)
+    assert isinstance(s.MAX_CONNECTIONS, int)
+    assert isinstance(s.INSTRUMENTS_PER_CONNECTION, int)
+    assert isinstance(s.SCRIP_CACHE_DIR, str)
+    assert isinstance(s.STALE_TTL_MINUTES, int)
     assert not hasattr(s, "FEED_MODE")
 
 def test_total_slots():

@@ -16,7 +16,7 @@ class Settings:
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
-    MAX_CONNECTIONS: int = int(os.getenv("MAX_CONNECTIONS", "1"))
+    MAX_CONNECTIONS: int = int(os.getenv("MAX_CONNECTIONS", "3"))
     INSTRUMENTS_PER_CONNECTION: int = int(os.getenv("INSTRUMENTS_PER_CONNECTION", "100"))
     SCRIP_CACHE_DIR: str = os.getenv("SCRIP_CACHE_DIR", "cache")
     STALE_TTL_MINUTES: int = int(os.getenv("STALE_TTL_MINUTES", "30"))
