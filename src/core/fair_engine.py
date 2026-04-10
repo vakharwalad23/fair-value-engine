@@ -170,6 +170,9 @@ class FairEngine:
         # security_id -> latest LTP
         self._ltp: dict[str, float] = {}
 
+        # security_id -> latest Tick (full metadata including bid/ask/volume/oi/buy_qty/sell_qty)
+        self._tick_data: dict[str, Tick] = {}
+
         # security_id -> deque of FairResult
         self._history: dict[str, deque] = {}
 
@@ -216,6 +219,7 @@ class FairEngine:
             self._history.pop(security_id, None)
             self._results.pop(security_id, None)
             self._ltp.pop(security_id, None)
+            self._tick_data.pop(security_id, None)
             self._iv_history.pop(security_id, None)
             if meta:
                 underlying_set = self._underlying_to_contracts.get(meta.underlying_security_id)
@@ -265,6 +269,7 @@ class FairEngine:
                 # It is a contract tick
                 if tick.security_id in self._contracts:
                     self._ltp[tick.security_id] = tick.ltp
+                    self._tick_data[tick.security_id] = tick
                     affected_sids = [tick.security_id]
                 else:
                     affected_sids = []
@@ -348,7 +353,7 @@ class FairEngine:
             mispricing_pct = 500.0 if mispricing_pct > 0 else -500.0
         basis = market_price - S
 
-        return FairResult(
+        result = FairResult(
             security_id=meta.security_id,
             symbol=meta.symbol,
             contract_type=meta.contract_type,
@@ -365,6 +370,24 @@ class FairEngine:
             exchanges=list(meta.exchanges),
             tier=meta.tier,
         )
+
+        tick = self._tick_data.get(meta.security_id)
+        if tick:
+            result.volume = tick.volume
+            result.oi = tick.oi
+            result.bid = tick.bid
+            result.ask = tick.ask
+            result.buy_qty = tick.buy_qty
+            result.sell_qty = tick.sell_qty
+            if tick.bid is not None and tick.ask is not None:
+                result.spread = round(tick.ask - tick.bid, 2)
+                if market_price > 0:
+                    result.spread_pct = round(result.spread / market_price * 100, 4)
+            from src.core.models import compute_liquidity_score
+            result.liquidity_score = compute_liquidity_score(tick.volume, tick.oi, result.spread_pct, market_price)
+            result.low_liquidity = (result.liquidity_score or 0) < 20
+
+        return result
 
     def _calc_option(
         self, meta: ContractMeta, S: float, market_price: float, T: float, r: float
@@ -405,7 +428,7 @@ class FairEngine:
         pcp_dev = self._calc_parity_deviation(meta, S, T, r)
         skew = self._calc_skew(meta)
 
-        return FairResult(
+        result = FairResult(
             security_id=meta.security_id,
             symbol=meta.symbol,
             contract_type=meta.contract_type,
@@ -439,6 +462,24 @@ class FairEngine:
             exchanges=list(meta.exchanges),
             tier=meta.tier,
         )
+
+        tick = self._tick_data.get(meta.security_id)
+        if tick:
+            result.volume = tick.volume
+            result.oi = tick.oi
+            result.bid = tick.bid
+            result.ask = tick.ask
+            result.buy_qty = tick.buy_qty
+            result.sell_qty = tick.sell_qty
+            if tick.bid is not None and tick.ask is not None:
+                result.spread = round(tick.ask - tick.bid, 2)
+                if market_price > 0:
+                    result.spread_pct = round(result.spread / market_price * 100, 4)
+            from src.core.models import compute_liquidity_score
+            result.liquidity_score = compute_liquidity_score(tick.volume, tick.oi, result.spread_pct, market_price)
+            result.low_liquidity = (result.liquidity_score or 0) < 20
+
+        return result
 
     def _update_iv_history(self, security_id: str, iv: float) -> None:
         """Store one IV entry per calendar day (overwrites same-day entry)."""

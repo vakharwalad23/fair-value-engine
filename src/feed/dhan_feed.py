@@ -6,6 +6,7 @@ import time
 from typing import Callable, Optional
 
 from src.core.models import Tick
+from src.utils.market_hours import is_market_open, seconds_until_market_open
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,13 @@ class DhanFeedClient:
                         pass
                 self._loop = None
             if self._running:
+                if not is_market_open():
+                    wait = seconds_until_market_open()
+                    logger.info(f"Feed {self._connection_id} market closed. Sleeping {wait/3600:.1f}h until next session")
+                    while wait > 0 and self._running:
+                        time.sleep(min(60, wait))
+                        wait -= 60
+                    continue
                 logger.info(f"Feed {self._connection_id} reconnecting in {backoff}s...")
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 60)
@@ -135,6 +143,8 @@ class DhanFeedClient:
             volume=data.get("volume"),
             bid=float(data["bid_price"]) if data.get("bid_price") else None,
             ask=float(data["ask_price"]) if data.get("ask_price") else None,
+            buy_qty=data.get("total_buy_quantity"),
+            sell_qty=data.get("total_sell_quantity"),
         )
         self._on_tick(tick)
 
