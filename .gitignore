@@ -222,3 +222,6 @@ __marimo__/
 
 # Scrip master cache
 cache/
+
+# Specs
+docs/specs/
