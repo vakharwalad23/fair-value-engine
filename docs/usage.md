@@ -69,12 +69,15 @@ The Docker setup uses a named volume `scrip_cache` to persist the scrip master C
 
 ## What Happens on Startup
 
-1. **Scrip master** downloads from Dhan (~225k instruments, cached for 24h, thread-safe index build)
-2. **Fuzzy index** built over all F&O instruments for search
-3. **3 WebSocket connections** opened (15,000 instrument slots total)
-4. **Tier 1** subscribes index full chains (NIFTY, BANKNIFTY, etc.) + their underlyings automatically
-5. **Tier 2/3** applied from saved config (if any)
-6. **Ticks start flowing**, fair values calculated in real-time
+1. **Market hours** holiday calendar loaded from NSE API (cached to disk)
+2. **Scrip master** downloads from Dhan (~225k instruments, cached for 24h, thread-safe index build)
+3. **Fuzzy index** built over all F&O instruments for search
+4. **3 WebSocket connections** opened (15,000 instrument slots total)
+5. **Depth feed** started (20-level depth, max 50 instruments, auto-rotates every 30s to top signal contracts)
+6. **Tier 1** subscribes index full chains (NIFTY, BANKNIFTY, etc.) + their underlyings automatically
+7. **Tier 2/3** applied from saved config (if any)
+8. **Ticks start flowing**, fair values calculated in real-time with liquidity and depth fields populated
+9. After market close (15:30 IST), feeds sleep gracefully until next session open; dashboard shows MARKET CLOSED with countdown
 
 If Dhan credentials are missing, server starts in degraded mode (no feed, API returns 503 for feed-dependent routes).
 
@@ -99,6 +102,10 @@ If Dhan credentials are missing, server starts in degraded mode (no feed, API re
 | POST | `/api/tiers` | Update tier configuration |
 | GET | `/api/health` | Health check |
 | GET | `/api/slots` | Slot usage breakdown |
+| GET | `/api/optionchain?symbol=NIFTY&expiry=2026-04-24` | Dhan option chain with engine values side-by-side |
+| GET | `/api/optionchain/expiries?symbol=NIFTY` | Available expiry dates from Dhan option chain API |
+| GET | `/api/optionchain/validate?symbol=NIFTY&expiry=2026-04-24` | Cross-validation deviation report (OK/WARN/ALERT per field) |
+| GET | `/api/market-status` | Current market state: LIVE, PRE_OPEN, or CLOSED with countdown |
 | WS | `/ws/fair` | Live FairResult JSON stream |
 
 ## Dashboard Tabs
@@ -142,12 +149,74 @@ curl http://localhost:8000/api/tiers
 curl -X POST http://localhost:8000/api/tiers \
   -H "Content-Type: application/json" \
   -d '{"tier2_stocks": ["RELIANCE", "TCS", "INFY"], "tier2_atm_range": 10}'
+
+# Option chain with engine values side-by-side
+curl "http://localhost:8000/api/optionchain?symbol=NIFTY&expiry=2026-04-24"
+
+# Available expiries from Dhan option chain API
+curl "http://localhost:8000/api/optionchain/expiries?symbol=NIFTY"
+
+# Cross-validation report -- compares engine Greeks/IV vs Dhan values
+curl "http://localhost:8000/api/optionchain/validate?symbol=NIFTY&expiry=2026-04-24"
+
+# Market status with countdown
+curl http://localhost:8000/api/market-status
+# Example response: {"status": "CLOSED", "next_open": "2026-04-14T09:15:00+05:30", "seconds_to_open": 63900}
 ```
+
+## Liquidity Score
+
+Each `FairResult` includes a `liquidity_score` (0–100) computed from:
+
+- **Volume** -- normalized daily traded volume relative to the instrument's rolling average
+- **Open Interest** -- OI level relative to rolling average
+- **Spread %** -- `(ask - bid) / mid_price`; tighter spread scores higher
+- **Depth** -- total bid + ask quantity in the 20-level order book
+
+A score below 20 sets `low_liquidity: true` on the result. Contracts with `low_liquidity: true` produce less reliable mispricing signals and should be treated with caution.
+
+## FairResult Liquidity and Depth Fields
+
+New fields available in every `FairResult`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `volume` | int | Traded volume for the day |
+| `oi` | int | Open interest |
+| `bid` | float | Best bid price |
+| `ask` | float | Best ask price |
+| `spread` | float | `ask - bid` |
+| `spread_pct` | float | `spread / mid_price * 100` |
+| `buy_qty` | int | Total pending buy quantity at best bid |
+| `sell_qty` | int | Total pending sell quantity at best ask |
+| `liquidity_score` | float | 0–100 composite score |
+| `low_liquidity` | bool | True if `liquidity_score < 20` |
+| `depth_bids` | list | 20 bid levels `[{price, qty}]` |
+| `depth_asks` | list | 20 ask levels `[{price, qty}]` |
+| `total_bid_depth` | int | Sum of qty across all 20 bid levels |
+| `total_ask_depth` | int | Sum of qty across all 20 ask levels |
+| `bid_ask_imbalance` | float | `(bid_depth - ask_depth) / (bid_depth + ask_depth)`, range -1 to +1 |
+| `dhan_iv` | float | IV reported by Dhan option chain API |
+| `dhan_delta` | float | Delta reported by Dhan option chain API |
+| `dhan_theta` | float | Theta reported by Dhan option chain API |
+| `dhan_gamma` | float | Gamma reported by Dhan option chain API |
+| `dhan_vega` | float | Vega reported by Dhan option chain API |
+| `iv_deviation` | float | `(engine_iv - dhan_iv) / dhan_iv * 100` |
+
+## Market Hours Behavior
+
+The engine is aware of NSE trading hours (9:15–15:30 IST, Monday–Friday, excluding holidays):
+
+- Holiday calendar is fetched from the NSE API on startup and cached to disk. It refreshes automatically.
+- After market close at 15:30, all feed connections call `MarketHours.wait_for_open()` on their next reconnect, sleeping until 9:15 the following trading day instead of reconnect-looping.
+- The `/api/market-status` endpoint returns `LIVE`, `PRE_OPEN`, or `CLOSED`, along with the ISO timestamp and seconds countdown to the next session.
+- The dashboard displays a **MARKET CLOSED** indicator when the market is not live.
 
 ## Testing
 
 ```bash
 .venv/bin/python -m pytest tests/ -v
-# 91 tests covering: math, scrip resolution, feed clients, connection pool,
-# slot tracking, tier config, rotation, API routes, models, time utils
+# 105 tests covering: math, scrip resolution, feed clients, connection pool,
+# slot tracking, tier config, rotation, API routes, models, time utils,
+# liquidity scoring, depth feed, option chain, cross-validation, market hours
 ```

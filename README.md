@@ -6,9 +6,13 @@ Real-time F&O fair value calculator for Indian markets. Calculates theoretical p
 
 ```mermaid
 graph LR
-    Dhan["Dhan WebSocket"] -->|ticks| Pool["ConnectionPool<br/>3 x 5,000 slots"]
-    Pool --> Engine["FairEngine<br/>BS + Greeks"]
+    Dhan["Dhan WebSocket"] -->|ticks + liquidity| Pool["ConnectionPool<br/>3 x 5,000 slots"]
+    DepthWS["Dhan Depth WS"] -->|20-level depth| Depth["DepthFeedClient<br/>50 instruments"]
+    Pool --> Engine["FairEngine<br/>BS + Greeks + Liquidity"]
+    Depth --> Engine
     Engine --> API["FastAPI"]
+    DhanREST["Dhan REST API"] -->|option chain| CrossVal["CrossValidator"]
+    CrossVal --> API
     API --> Dashboard["Dashboard"]
     Scrip["Scrip Master<br/>~225k instruments"] -->|resolve| Engine
 ```
@@ -40,11 +44,13 @@ docker compose up --build
 
 ## What Happens on Startup
 
-1. Downloads Dhan scrip master CSV (~225k instruments, cached 24h)
-2. Builds fuzzy search index over all F&O instruments
-3. Opens 3 WebSocket connections (15,000 instrument slots total)
-4. Subscribes Tier 1 index chains (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, SENSEX, BANKEX) + their underlyings
-5. Starts receiving live ticks, calculating fair values in real-time
+1. Loads NSE holiday calendar (fetched from NSE API, cached to disk)
+2. Downloads Dhan scrip master CSV (~225k instruments, cached 24h)
+3. Builds fuzzy search index over all F&O instruments
+4. Opens 3 WebSocket connections (15,000 instrument slots total) + 1 depth connection (50 instruments)
+5. Subscribes Tier 1 index chains (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, SENSEX, BANKEX) + their underlyings
+6. Starts receiving live ticks with liquidity fields; depth feed auto-rotates to top 50 signal contracts every 30s
+7. After market close (15:30 IST), feeds sleep gracefully until next session; dashboard shows MARKET CLOSED
 
 ## Fair Value Models
 
@@ -65,6 +71,10 @@ docker compose up --build
 - **15,000 instrument slots** across 3 WebSocket connections with tiered subscription management
 - **Enhanced Greeks** -- vanna, volga, charm, speed, color, zomma
 - **Market structure metrics** -- IV rank, IV percentile, moneyness, put-call parity deviation, basis, skew
+- **Liquidity metrics** -- volume, OI, bid/ask spread, buy/sell qty, composite liquidity score (0–100), low_liquidity flag
+- **20-level market depth** -- depth_bids, depth_asks, total depth, bid/ask imbalance (-1 to +1) via dedicated depth WebSocket connection (auto-rotates to top 50 signal contracts every 30s)
+- **Option chain cross-validation** -- compares engine-computed Greeks and IV against Dhan option chain API values; OK/WARN/ALERT deviation report per field
+- **Market hours awareness** -- NSE holiday calendar (9:15–15:30 IST); feeds sleep gracefully after close instead of reconnect-looping; dashboard shows MARKET CLOSED indicator with countdown
 - **Auto-resolution** -- provide symbol + expiry + strike + type, system resolves all IDs from Dhan scrip master
 - **Underlying auto-subscription** -- when subscribing derivatives, the underlying index/equity is automatically subscribed too
 - **ATM rotation** -- Tier 2 stocks auto-rotate subscriptions as spot price moves
@@ -93,6 +103,9 @@ Configure via dashboard Tier Config panel or `POST /api/tiers`.
 | GET | `/api/search?q=NIFTY` | Fuzzy search instruments |
 | GET | `/api/tiers` | Tier configuration |
 | GET | `/api/slots` | Slot usage breakdown |
+| GET | `/api/optionchain?symbol=NIFTY&expiry=2026-04-24` | Dhan option chain with engine values side-by-side |
+| GET | `/api/optionchain/validate?symbol=NIFTY&expiry=2026-04-24` | Greeks/IV cross-validation report |
+| GET | `/api/market-status` | LIVE / PRE_OPEN / CLOSED with countdown |
 | WS | `/ws/fair` | Live FairResult stream |
 
 Full endpoint list in [docs/usage.md](docs/usage.md).
@@ -106,10 +119,12 @@ src/
 ├── config.py                # Settings from .env
 ├── core/
 │   ├── models.py            # ContractMeta, Tick, FairResult
-│   └── fair_engine.py       # BS, CoC, Greeks, engine class
+│   ├── fair_engine.py       # BS, CoC, Greeks, liquidity, depth engine
+│   └── cross_validator.py   # Greeks/IV deviation vs Dhan option chain
 ├── feed/
 │   ├── dhan_feed.py         # Dhan SDK wrapper (DhanFeed)
-│   └── connection_pool.py   # Multi-connection manager
+│   ├── connection_pool.py   # Multi-connection manager
+│   └── depth_feed.py        # 20-level depth WebSocket client
 ├── subscription/
 │   ├── slot_tracker.py      # Capacity tracking
 │   ├── tier_config.py       # Tier persistence (JSON)
@@ -118,14 +133,17 @@ src/
 │   └── scrip_master.py      # CSV resolver + cross-listing
 ├── search/
 │   └── fuzzy_index.py       # rapidfuzz search
+├── utils/
+│   └── market_hours.py      # NSE hours, holiday calendar, sleep helpers
 └── api/
     ├── schemas.py            # Pydantic models
-    └── routes/               # FastAPI routers
+    └── routes/               # FastAPI routers (incl. optionchain.py)
 ```
 
 ## Testing
 
 ```bash
 .venv/bin/python -m pytest tests/ -v
-# 91 tests covering math, scrip resolution, feed, subscriptions, API routes
+# 105 tests covering math, scrip resolution, feed, subscriptions, API routes,
+# liquidity scoring, depth feed, option chain, cross-validation, market hours
 ```
