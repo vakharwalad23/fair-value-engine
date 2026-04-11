@@ -146,6 +146,8 @@ header {
   flex-shrink: 0;
 }
 .dot.live { background: var(--green); }
+.dot.pre-open { background: var(--yellow); }
+.dot.closed { background: var(--muted); }
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
 
 /* Tab Bar */
@@ -787,6 +789,69 @@ select:focus, input[type=number]:focus, input[type=text]:focus {
 .detail-row .dlabel { color: var(--muted); }
 .detail-row .dval { color: var(--text); font-weight: 600; }
 
+/* Low liquidity */
+.low-liq { opacity: 0.5; }
+.badge-low-liq { background: var(--red); color: white; font-size: 9px; padding: 1px 4px; border-radius: 2px; }
+
+/* Liquidity score colors */
+.liq-high { color: var(--green); }
+.liq-mid { color: var(--yellow); }
+.liq-low { color: var(--red); }
+
+/* Imbalance arrows */
+.imbal-buy { color: var(--green); font-size: 11px; }
+.imbal-sell { color: var(--red); font-size: 11px; }
+.imbal-neutral { color: var(--muted); font-size: 11px; }
+
+/* Depth ladder */
+.depth-ladder { width: 100%; margin-top: 8px; }
+.depth-ladder-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.depth-row {
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(30,45,61,0.3);
+}
+.depth-bid-bar, .depth-ask-bar {
+  height: 14px;
+  border-radius: 2px;
+  min-width: 2px;
+}
+.depth-bid-bar { background: rgba(0,255,136,0.3); margin-right: 4px; }
+.depth-ask-bar { background: rgba(255,71,87,0.3); margin-left: 4px; }
+.depth-bid-qty { width: 70px; text-align: right; color: var(--green); }
+.depth-price { width: 90px; text-align: center; color: var(--text); font-weight: 600; }
+.depth-ask-qty { width: 70px; text-align: left; color: var(--red); }
+.depth-bar-cell { flex: 1; display: flex; align-items: center; }
+.depth-bar-cell.bid { justify-content: flex-end; }
+.depth-bar-cell.ask { justify-content: flex-start; }
+.depth-summary {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  padding: 6px 0;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.depth-summary span { color: var(--muted); }
+.depth-summary strong { color: var(--text); }
+.depth-no-data { color: var(--muted); font-size: 11px; font-style: italic; padding: 8px 0; }
+
+/* Cross-validation status */
+.cv-ok { color: var(--green); }
+.cv-warn { color: var(--yellow); }
+.cv-alert { color: var(--red); }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
@@ -807,6 +872,9 @@ select:focus, input[type=number]:focus, input[type=text]:focus {
     <button class="btn-tier-config" id="btnTierConfig">Tier Config</button>
   </div>
   <div class="header-status">
+    <span style="color:var(--muted);font-size:10px;">AVG LIQ</span>
+    <span id="avgLiqScore" style="font-weight:600;font-size:11px;">—</span>
+    <span style="color:var(--border);">|</span>
     <span class="dot" id="wsDot"></span>
     <span id="wsStatus">Connecting...</span>
     <span id="clock"></span>
@@ -857,11 +925,16 @@ select:focus, input[type=number]:focus, input[type=text]:focus {
                 <th class="sortable" onclick="signalSort('pc_parity_deviation')">PCPar</th>
                 <th class="sortable" onclick="signalSort('basis')">Basis</th>
                 <th class="sortable" onclick="signalSort('skew')">Skew</th>
+                <th class="sortable" onclick="signalSort('volume')">Vol</th>
+                <th class="sortable" onclick="signalSort('oi')">OI</th>
+                <th class="sortable" onclick="signalSort('spread_pct')">Spread%</th>
+                <th class="sortable" onclick="signalSort('liquidity_score')">LiqScore</th>
+                <th>Imbal</th>
                 <th></th>
               </tr>
             </thead>
             <tbody id="overBody">
-              <tr><td colspan="23" class="empty-state">No overvalued contracts</td></tr>
+              <tr><td colspan="28" class="empty-state">No overvalued contracts</td></tr>
             </tbody>
           </table>
         </div>
@@ -896,11 +969,16 @@ select:focus, input[type=number]:focus, input[type=text]:focus {
                 <th class="sortable" onclick="signalSort('pc_parity_deviation')">PCPar</th>
                 <th class="sortable" onclick="signalSort('basis')">Basis</th>
                 <th class="sortable" onclick="signalSort('skew')">Skew</th>
+                <th class="sortable" onclick="signalSort('volume')">Vol</th>
+                <th class="sortable" onclick="signalSort('oi')">OI</th>
+                <th class="sortable" onclick="signalSort('spread_pct')">Spread%</th>
+                <th class="sortable" onclick="signalSort('liquidity_score')">LiqScore</th>
+                <th>Imbal</th>
                 <th></th>
               </tr>
             </thead>
             <tbody id="underBody">
-              <tr><td colspan="23" class="empty-state">No undervalued contracts</td></tr>
+              <tr><td colspan="28" class="empty-state">No undervalued contracts</td></tr>
             </tbody>
           </table>
         </div>
@@ -978,12 +1056,16 @@ select:focus, input[type=number]:focus, input[type=text]:focus {
             <th class="sortable" onclick="allSort('pc_parity_deviation')">PCPar</th>
             <th class="sortable" onclick="allSort('basis')">Basis</th>
             <th class="sortable" onclick="allSort('skew')">Skew</th>
+            <th class="sortable" onclick="allSort('volume')">Vol</th>
+            <th class="sortable" onclick="allSort('oi')">OI</th>
+            <th class="sortable" onclick="allSort('spread_pct')">Spread%</th>
+            <th class="sortable" onclick="allSort('liquidity_score')">LiqScore</th>
             <th>Tier</th>
             <th>Exchange</th>
           </tr>
         </thead>
         <tbody id="allBody">
-          <tr><td colspan="25" class="empty-state">Waiting for data...</td></tr>
+          <tr><td colspan="29" class="empty-state">Waiting for data...</td></tr>
         </tbody>
       </table>
     </div>
@@ -1165,6 +1247,43 @@ function misColor(val) {
   return 'var(--muted)';
 }
 
+function fmtVol(n) {
+  if (n == null) return '—';
+  if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+  return n.toString();
+}
+
+function liqScoreClass(score) {
+  if (score == null) return '';
+  if (score > 60) return 'liq-high';
+  if (score >= 20) return 'liq-mid';
+  return 'liq-low';
+}
+
+function imbalanceIndicator(val) {
+  if (val == null) return '<span class="imbal-neutral">—</span>';
+  if (val > 0.1) return '<span class="imbal-buy">&#9650;</span>';
+  if (val < -0.1) return '<span class="imbal-sell">&#9660;</span>';
+  return '<span class="imbal-neutral">—</span>';
+}
+
+function cvStatusClass(engineVal, dhanVal) {
+  if (engineVal == null || dhanVal == null) return '';
+  const base = Math.max(Math.abs(engineVal), 0.0001);
+  const dev = Math.abs(engineVal - dhanVal) / base * 100;
+  if (dev < 5) return 'cv-ok';
+  if (dev < 15) return 'cv-warn';
+  return 'cv-alert';
+}
+
+function cvDevPct(engineVal, dhanVal) {
+  if (engineVal == null || dhanVal == null) return '—';
+  const base = Math.max(Math.abs(engineVal), 0.0001);
+  const dev = Math.abs(engineVal - dhanVal) / base * 100;
+  return dev.toFixed(1) + '%';
+}
+
 function debounce(fn, ms) {
   let t;
   return function(...args) {
@@ -1218,6 +1337,7 @@ function onMessage(data) {
   else if (activeTab === 'all') renderAll();
 
   updateUnderlyingDropdown();
+  updateAvgLiq();
 }
 
 // Tab switching
@@ -1252,8 +1372,8 @@ function renderSignals() {
     .filter(d => d.signal === 'UNDERVALUED')
     .sort((a, b) => sortCmp(a, b, signalSortField, signalSortAsc));
 
-  renderSignalTable('overBody', over, 23);
-  renderSignalTable('underBody', under, 23);
+  renderSignalTable('overBody', over, 28);
+  renderSignalTable('underBody', under, 28);
 }
 
 function renderSignalTable(tbodyId, rows, colspan) {
@@ -1264,8 +1384,10 @@ function renderSignalTable(tbodyId, rows, colspan) {
   }
   tbody.innerHTML = rows.map(d => {
     const mc = misColor(d.mispricing);
-    return `<tr style="cursor:pointer" onclick="openDetail('${d.security_id}')">
-      <td class="sym">${d.symbol}</td>
+    const lowLiqClass = d.low_liquidity ? ' low-liq' : '';
+    const lowLiqBadge = d.low_liquidity ? ' <span class="badge-low-liq">LOW LIQ</span>' : '';
+    return `<tr class="${lowLiqClass}" style="cursor:pointer" onclick="openDetail('${d.security_id}')">
+      <td class="sym">${d.symbol}${lowLiqBadge}</td>
       <td class="typ-${d.contract_type}">${d.contract_type}</td>
       <td>${d.strike != null ? fmt(d.strike, 0) : '—'}</td>
       <td>${fmt(d.market_price)}</td>
@@ -1287,6 +1409,11 @@ function renderSignalTable(tbodyId, rows, colspan) {
       <td>${d.pc_parity_deviation != null ? fmt(d.pc_parity_deviation) : '—'}</td>
       <td>${d.basis != null ? fmt(d.basis) : '—'}</td>
       <td>${d.skew != null ? fmt(d.skew) : '—'}</td>
+      <td>${fmtVol(d.volume)}</td>
+      <td>${fmtVol(d.oi)}</td>
+      <td>${d.spread_pct != null ? fmt(d.spread_pct, 2) : '—'}</td>
+      <td class="${liqScoreClass(d.liquidity_score)}">${d.liquidity_score != null ? fmt(d.liquidity_score, 0) : '—'}</td>
+      <td>${imbalanceIndicator(d.bid_ask_imbalance)}</td>
       <td><button class="btn-unsub" onclick="event.stopPropagation(); unsubscribe('${d.security_id}')">x</button></td>
     </tr>`;
   }).join('');
@@ -1428,7 +1555,7 @@ function renderAll() {
   allCount.textContent = rows.length;
 
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="25" class="empty-state">Waiting for data...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="29" class="empty-state">Waiting for data...</td></tr>';
     updateAllPagination(0);
     return;
   }
@@ -1447,9 +1574,11 @@ function renderAll() {
       ? `<span class="badge badge-cross">NSE|BSE</span>`
       : (d.exchanges && d.exchanges.length ? d.exchanges[0] : '—');
     const staleClass = d.stale ? ' stale-row' : '';
+    const lowLiqClass = d.low_liquidity ? ' low-liq' : '';
     const staleTag = d.stale ? ' <span class="badge badge-stale">stale</span>' : '';
-    return `<tr class="${staleClass}" style="cursor:pointer" onclick="openDetail('${d.security_id}')">
-      <td class="sym">${d.symbol}${staleTag}</td>
+    const lowLiqBadge = d.low_liquidity ? ' <span class="badge-low-liq">LOW LIQ</span>' : '';
+    return `<tr class="${staleClass}${lowLiqClass}" style="cursor:pointer" onclick="openDetail('${d.security_id}')">
+      <td class="sym">${d.symbol}${staleTag}${lowLiqBadge}</td>
       <td class="typ-${d.contract_type}">${d.contract_type}</td>
       <td>${d.strike != null ? fmt(d.strike, 0) : '—'}</td>
       <td>${d.expiry || '—'}</td>
@@ -1472,6 +1601,10 @@ function renderAll() {
       <td>${d.pc_parity_deviation != null ? fmt(d.pc_parity_deviation) : '—'}</td>
       <td>${d.basis != null ? fmt(d.basis) : '—'}</td>
       <td>${d.skew != null ? fmt(d.skew) : '—'}</td>
+      <td>${fmtVol(d.volume)}</td>
+      <td>${fmtVol(d.oi)}</td>
+      <td>${d.spread_pct != null ? fmt(d.spread_pct, 2) : '—'}</td>
+      <td class="${liqScoreClass(d.liquidity_score)}">${d.liquidity_score != null ? fmt(d.liquidity_score, 0) : '—'}</td>
       <td>${tierBadge}</td>
       <td>${exchBadge}</td>
     </tr>`;
@@ -1783,6 +1916,26 @@ function openDetail(secId) {
         ${detailRow('Stale', d.stale ? 'Yes' : 'No', 0, '', true)}
       </div>
     </div>
+    <div class="detail-grid">
+      <div>
+        <div class="detail-section-title">Liquidity</div>
+        ${detailRow('Volume', d.volume != null ? fmtVol(d.volume) : '—', 0, '', true)}
+        ${detailRow('Open Interest', d.oi != null ? fmtVol(d.oi) : '—', 0, '', true)}
+        ${detailRow('Bid', d.bid, 2)}
+        ${detailRow('Ask', d.ask, 2)}
+        ${detailRow('Spread %', d.spread_pct, 2, '%')}
+        ${detailRow('Liquidity Score', d.liquidity_score, 0)}
+        ${detailRow('Low Liquidity', d.low_liquidity ? 'Yes' : 'No', 0, '', true)}
+      </div>
+      <div>
+        <div class="detail-section-title">Dhan Cross-Validation</div>
+        ${buildCrossValidationSection(d)}
+      </div>
+    </div>
+    <div>
+      <div class="detail-section-title">Order Book (20-level depth)</div>
+      ${buildDepthLadder(d)}
+    </div>
   `;
 
   document.getElementById('detailOverlay').classList.add('open');
@@ -1796,6 +1949,116 @@ function detailRow(label, value, dec, suffix, isStr) {
     display = value != null && !isNaN(value) ? fmt(value, dec) + (suffix || '') : '—';
   }
   return `<div class="detail-row"><span class="dlabel">${label}</span><span class="dval">${display}</span></div>`;
+}
+
+function buildCrossValidationSection(d) {
+  if (d.dhan_iv == null && d.dhan_delta == null && d.dhan_theta == null && d.dhan_gamma == null && d.dhan_vega == null) {
+    return '<div class="depth-no-data">Run /api/optionchain/validate to populate</div>';
+  }
+  let html = '';
+  const fields = [
+    { label: 'IV', engine: d.implied_volatility, dhan: d.dhan_iv },
+    { label: 'Delta', engine: d.delta, dhan: d.dhan_delta },
+    { label: 'Theta', engine: d.theta, dhan: d.dhan_theta },
+    { label: 'Gamma', engine: d.gamma, dhan: d.dhan_gamma },
+    { label: 'Vega', engine: d.vega, dhan: d.dhan_vega },
+  ];
+  fields.forEach(f => {
+    const cls = cvStatusClass(f.engine, f.dhan);
+    const dev = cvDevPct(f.engine, f.dhan);
+    const engineStr = f.engine != null ? fmt(f.engine, 4) : '—';
+    const dhanStr = f.dhan != null ? fmt(f.dhan, 4) : '—';
+    html += `<div class="detail-row">
+      <span class="dlabel">${f.label}</span>
+      <span class="dval">${engineStr} vs ${dhanStr} <span class="${cls}" style="font-size:10px;">(${dev})</span></span>
+    </div>`;
+  });
+  return html;
+}
+
+function buildDepthLadder(d) {
+  const bids = d.depth_bids;
+  const asks = d.depth_asks;
+  if (!bids || !bids.length || !asks || !asks.length) {
+    return '<div class="depth-no-data">No depth data — not in top 50 signals</div>';
+  }
+  const maxQty = Math.max(
+    ...bids.map(b => b.quantity || 0),
+    ...asks.map(a => a.quantity || 0),
+    1
+  );
+  const levels = Math.max(bids.length, asks.length);
+  let rows = '';
+  for (let i = 0; i < levels; i++) {
+    const bid = bids[i] || {};
+    const ask = asks[i] || {};
+    const bidQty = bid.quantity || 0;
+    const askQty = ask.quantity || 0;
+    const bidPct = (bidQty / maxQty * 100).toFixed(0);
+    const askPct = (askQty / maxQty * 100).toFixed(0);
+    const bidPrice = bid.price != null ? fmt(bid.price, 2) : '';
+    const askPrice = ask.price != null ? fmt(ask.price, 2) : '';
+    rows += `<div class="depth-row">
+      <div class="depth-bar-cell bid"><div class="depth-bid-bar" style="width:${bidPct}%"></div></div>
+      <span class="depth-bid-qty">${bidQty ? fmtVol(bidQty) : ''}</span>
+      <span class="depth-price">${bidPrice || askPrice}</span>
+      <span class="depth-ask-qty">${askQty ? fmtVol(askQty) : ''}</span>
+      <div class="depth-bar-cell ask"><div class="depth-ask-bar" style="width:${askPct}%"></div></div>
+    </div>`;
+  }
+  let summary = '<div class="depth-summary">';
+  summary += `<span>Total Bid: <strong>${fmtVol(d.total_bid_depth)}</strong></span>`;
+  summary += `<span>Total Ask: <strong>${fmtVol(d.total_ask_depth)}</strong></span>`;
+  summary += `<span>Imbalance: <strong>${d.bid_ask_imbalance != null ? fmt(d.bid_ask_imbalance, 3) : '—'}</strong></span>`;
+  summary += '</div>';
+  return `<div class="depth-ladder">
+    <div class="depth-ladder-header"><span>Bids</span><span>Price</span><span>Asks</span></div>
+    ${rows}
+    ${summary}
+  </div>`;
+}
+
+async function updateMarketStatus() {
+  try {
+    const resp = await fetch('/api/market-status');
+    const data = await resp.json();
+    const dot = document.getElementById('wsDot');
+    const txt = document.getElementById('wsStatus');
+    if (data.status === 'LIVE') {
+      dot.className = 'dot live';
+      txt.textContent = 'LIVE';
+      txt.style.color = '';
+    } else if (data.status === 'PRE_OPEN') {
+      dot.className = 'dot pre-open';
+      txt.textContent = 'PRE-OPEN';
+      txt.style.color = 'var(--yellow)';
+    } else {
+      dot.className = 'dot closed';
+      txt.textContent = 'MARKET CLOSED';
+      txt.style.color = 'var(--muted)';
+      if (data.next_open_in_seconds) {
+        const h = Math.floor(data.next_open_in_seconds / 3600);
+        const m = Math.floor((data.next_open_in_seconds % 3600) / 60);
+        txt.textContent = `CLOSED \u00b7 Opens in ${h}h ${m}m`;
+      }
+    }
+  } catch(e) {}
+}
+
+function updateAvgLiq() {
+  const all = Object.values(state);
+  const scores = all.filter(d => d.liquidity_score != null).map(d => d.liquidity_score);
+  const el = document.getElementById('avgLiqScore');
+  if (!scores.length) {
+    el.textContent = '—';
+    el.style.color = '';
+    return;
+  }
+  const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+  el.textContent = avg.toFixed(0);
+  if (avg > 60) el.style.color = 'var(--green)';
+  else if (avg >= 20) el.style.color = 'var(--yellow)';
+  else el.style.color = 'var(--red)';
 }
 
 function closeDetail() {
@@ -1840,6 +2103,10 @@ document.getElementById('searchInput').addEventListener('input', function() {
 
 // Tier config button
 document.getElementById('btnTierConfig').addEventListener('click', openTierPanel);
+
+// Market status polling
+setInterval(updateMarketStatus, 30000);
+updateMarketStatus();
 
 // Init
 connect();
