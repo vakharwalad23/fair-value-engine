@@ -1,15 +1,15 @@
 """Option chain API routes — proxies to Dhan + cross-validation."""
 import time
 import logging
-from typing import Optional
+from typing import Any
 from fastapi import APIRouter, HTTPException
 
 router = APIRouter(prefix="/api/optionchain", tags=["optionchain"])
 logger = logging.getLogger(__name__)
 
-dhan_client = None  # dhanhq.dhanhq instance, set at startup
-engine = None
-scrip_master = None
+dhan_client: Any = None  # dhanhq.dhanhq instance, set at startup
+engine: Any = None
+scrip_master: Any = None
 
 # Simple TTL cache: key -> (timestamp, data)
 _cache: dict[str, tuple[float, dict]] = {}
