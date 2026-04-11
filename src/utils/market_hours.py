@@ -1,7 +1,7 @@
 """Market hours awareness — NSE trading hours + holiday calendar."""
 import json
 import logging
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -35,7 +35,10 @@ class MarketCalendar:
             self._holidays = set()
             for h in fo_holidays:
                 try:
-                    self._holidays.add(date.fromisoformat(h["tradingDate"]))
+                    raw = h["tradingDate"]
+                    # NSE returns "15-Jan-2026" format (DD-Mon-YYYY)
+                    parsed = datetime.strptime(raw, "%d-%b-%Y").date()
+                    self._holidays.add(parsed)
                 except (KeyError, ValueError):
                     continue
             # Cache to disk
