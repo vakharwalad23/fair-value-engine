@@ -4,6 +4,35 @@ from src.feed.dhan_feed import DhanFeedClient
 from src.core.models import Tick
 
 def test_parse_tick_data():
+    """Full packet (request code 21) has bid/ask nested in depth[0]."""
+    client = DhanFeedClient.__new__(DhanFeedClient)
+    client._on_tick = MagicMock()
+    client._subscribed = set()
+    client._lock = threading.Lock()
+
+    tick_data = {
+        "type": "Full Data",
+        "security_id": 42528, "LTP": "150.50",
+        "volume": 1000, "OI": 50000,
+        "total_buy_quantity": 200, "total_sell_quantity": 150,
+        "depth": [
+            {"bid_price": "150.00", "ask_price": "151.00", "bid_quantity": 10, "ask_quantity": 8},
+        ],
+    }
+    client._handle_tick(tick_data)
+    client._on_tick.assert_called_once()
+    tick = client._on_tick.call_args[0][0]
+    assert isinstance(tick, Tick)
+    assert tick.security_id == "42528"
+    assert tick.ltp == 150.5
+    assert tick.volume == 1000
+    assert tick.oi == 50000
+    assert tick.bid == 150.0
+    assert tick.ask == 151.0
+
+
+def test_parse_tick_data_top_level_bid_ask():
+    """Fallback: packets without depth list use top-level bid_price/ask_price."""
     client = DhanFeedClient.__new__(DhanFeedClient)
     client._on_tick = MagicMock()
     client._subscribed = set()
@@ -15,11 +44,9 @@ def test_parse_tick_data():
         "bid_price": 150.0, "ask_price": 151.0,
     }
     client._handle_tick(tick_data)
-    client._on_tick.assert_called_once()
     tick = client._on_tick.call_args[0][0]
-    assert isinstance(tick, Tick)
-    assert tick.security_id == "42528"
-    assert tick.ltp == 150.5
+    assert tick.bid == 150.0
+    assert tick.ask == 151.0
 
 def test_subscribe_tracks_in_subscribed():
     client = DhanFeedClient.__new__(DhanFeedClient)
