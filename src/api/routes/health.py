@@ -25,3 +25,15 @@ def get_slots():
     if connection_pool is None:
         raise HTTPException(503, "Feed not configured — set DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN")
     return {**slot_tracker.to_dict(), "per_connection": connection_pool.per_connection_usage()}
+
+
+@router.get("/market-status")
+def get_market_status():
+    from src.utils.market_hours import market_status, seconds_until_market_open, is_market_open
+    status = market_status()
+    result = {"status": status}
+    if not is_market_open():
+        secs = seconds_until_market_open()
+        result["next_open_in_seconds"] = int(secs)
+        result["next_open_in_hours"] = round(secs / 3600, 1)
+    return result

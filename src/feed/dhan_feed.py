@@ -6,6 +6,7 @@ import time
 from typing import Callable, Optional
 
 from src.core.models import Tick
+from src.utils.market_hours import is_market_open, seconds_until_market_open
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +19,10 @@ SEGMENT_MAP = {
 
 SEGMENT_REVERSE = {v: k for k, v in SEGMENT_MAP.items()}
 
-# DhanFeed v2 subscription request codes
+# DhanFeed v2 subscription request codes (must match dhanhq SDK constants)
 REQ_TICKER = 15
 REQ_QUOTE = 17
-REQ_FULL = 15  # v2 uses 15 for all subscription types; server sends Full packets
+REQ_FULL = 21  # Full packet: LTP + volume + OI + 5-level depth
 
 
 class DhanFeedClient:
@@ -109,6 +110,13 @@ class DhanFeedClient:
                         pass
                 self._loop = None
             if self._running:
+                if not is_market_open():
+                    wait = seconds_until_market_open()
+                    logger.info(f"Feed {self._connection_id} market closed. Sleeping {wait/3600:.1f}h until next session")
+                    while wait > 0 and self._running:
+                        time.sleep(min(60, wait))
+                        wait -= 60
+                    continue
                 logger.info(f"Feed {self._connection_id} reconnecting in {backoff}s...")
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 60)
@@ -128,15 +136,58 @@ class DhanFeedClient:
         if ltp <= 0:
             return
         oi = data.get("OI") or data.get("oi")
+
+        # Full/Quote packets nest bid/ask inside depth[0]; fall back to top-level keys
+        # for any future packet type that exposes them directly.
+        bid: Optional[float] = None
+        ask: Optional[float] = None
+        depth = data.get("depth")
+        if depth and isinstance(depth, list) and len(depth) > 0:
+            best = depth[0]
+            raw_bid = best.get("bid_price")
+            raw_ask = best.get("ask_price")
+            if raw_bid:
+                try:
+                    bid = float(raw_bid)
+                except (ValueError, TypeError):
+                    pass
+            if raw_ask:
+                try:
+                    ask = float(raw_ask)
+                except (ValueError, TypeError):
+                    pass
+        else:
+            raw_bid = data.get("bid_price")
+            raw_ask = data.get("ask_price")
+            if raw_bid:
+                try:
+                    bid = float(raw_bid)
+                except (ValueError, TypeError):
+                    pass
+            if raw_ask:
+                try:
+                    ask = float(raw_ask)
+                except (ValueError, TypeError):
+                    pass
+
         tick = Tick(
             security_id=str(data.get("security_id", "")),
             ltp=ltp,
             oi=int(oi) if oi is not None else None,
             volume=data.get("volume"),
-            bid=float(data["bid_price"]) if data.get("bid_price") else None,
-            ask=float(data["ask_price"]) if data.get("ask_price") else None,
+            bid=bid,
+            ask=ask,
+            buy_qty=data.get("total_buy_quantity"),
+            sell_qty=data.get("total_sell_quantity"),
         )
         self._on_tick(tick)
+
+    @staticmethod
+    def _req_code_for_segment(exchange_segment: str) -> int:
+        """IDX_I only supports Ticker (15); all other segments support Full (21)."""
+        if exchange_segment == "IDX_I":
+            return REQ_TICKER
+        return REQ_FULL
 
     def subscribe(self, security_id: str, exchange_segment: str) -> bool:
         pair = (security_id, exchange_segment)
@@ -149,7 +200,8 @@ class DhanFeedClient:
             self._subscribed.add(pair)
             if self._feed:
                 seg_code = SEGMENT_MAP.get(exchange_segment, 2)
-                self._feed.subscribe_symbols([(seg_code, str(security_id), REQ_FULL)])
+                req = self._req_code_for_segment(exchange_segment)
+                self._feed.subscribe_symbols([(seg_code, str(security_id), req)])
         return True
 
     def unsubscribe(self, security_id: str, exchange_segment: str):
@@ -158,10 +210,11 @@ class DhanFeedClient:
             self._subscribed.discard(pair)
             if self._feed:
                 seg_code = SEGMENT_MAP.get(exchange_segment, 2)
-                self._feed.unsubscribe_symbols([(seg_code, str(security_id), REQ_FULL)])
+                req = self._req_code_for_segment(exchange_segment)
+                self._feed.unsubscribe_symbols([(seg_code, str(security_id), req)])
 
     def _build_instrument_list(self, pairs: list[tuple[str, str]]) -> list[tuple[int, str, int]]:
-        return [(SEGMENT_MAP.get(seg, 2), sid, REQ_FULL) for sid, seg in pairs]
+        return [(SEGMENT_MAP.get(seg, 2), sid, self._req_code_for_segment(seg)) for sid, seg in pairs]
 
     def stop(self):
         self._running = False

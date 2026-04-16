@@ -1,4 +1,5 @@
 """Core data models for the F&O Fair Value Engine."""
+import math
 import time
 from dataclasses import dataclass, field
 from datetime import date
@@ -46,6 +47,8 @@ class Tick:
     volume: Optional[int] = None
     bid: Optional[float] = None
     ask: Optional[float] = None
+    buy_qty: Optional[int] = None
+    sell_qty: Optional[int] = None
 
 
 @dataclass
@@ -89,6 +92,33 @@ class FairResult:
     skew: Optional[float] = None
     exchange_spread: Optional[float] = None
 
+    # Liquidity metrics
+    volume: Optional[int] = None
+    oi: Optional[int] = None
+    bid: Optional[float] = None
+    ask: Optional[float] = None
+    spread: Optional[float] = None
+    spread_pct: Optional[float] = None
+    buy_qty: Optional[int] = None
+    sell_qty: Optional[int] = None
+    liquidity_score: Optional[float] = None
+    low_liquidity: bool = False
+
+    # 20-level depth (only for top 50 contracts)
+    depth_bids: Optional[list] = None
+    depth_asks: Optional[list] = None
+    total_bid_depth: Optional[int] = None
+    total_ask_depth: Optional[int] = None
+    bid_ask_imbalance: Optional[float] = None
+
+    # Cross-validation (from Dhan option chain API)
+    dhan_iv: Optional[float] = None
+    dhan_delta: Optional[float] = None
+    dhan_theta: Optional[float] = None
+    dhan_gamma: Optional[float] = None
+    dhan_vega: Optional[float] = None
+    iv_deviation: Optional[float] = None
+
     # Context
     cross_listed: bool = False
     exchanges: list[str] = field(default_factory=list)
@@ -112,3 +142,29 @@ class FairResult:
                 self.signal = "UNDERVALUED"
         if self.signal_strength == 0.0 and self.mispricing_pct != 0.0:
             self.signal_strength = abs(self.mispricing_pct)
+
+
+@dataclass
+class DepthLevel:
+    price: float
+    quantity: int
+    orders: int
+
+
+@dataclass
+class DepthData:
+    security_id: str
+    bids: list  # list of DepthLevel
+    asks: list  # list of DepthLevel
+    total_bid_depth: int
+    total_ask_depth: int
+    bid_ask_imbalance: float  # (bid - ask) / (bid + ask), range -1 to +1
+
+
+def compute_liquidity_score(volume: Optional[int], oi: Optional[int], spread_pct: Optional[float], ltp: Optional[float]) -> float:
+    if ltp is None or ltp <= 0:
+        return 0.0
+    vol_score = min(30, math.log1p(volume or 0) * 3)
+    oi_score = min(30, math.log1p(oi or 0) * 2.5)
+    spread_score = max(0, 40 - (spread_pct or 100) * 10)
+    return round(vol_score + oi_score + spread_score, 1)

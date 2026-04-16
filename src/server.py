@@ -1,6 +1,8 @@
 """F&O Fair Value Engine — FastAPI Server"""
 import asyncio
 import logging
+import threading
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -13,9 +15,11 @@ from src.core.models import FairResult
 from src.scrip.scrip_master import ScripMaster
 from src.search.fuzzy_index import FuzzyIndex
 from src.feed.connection_pool import ConnectionPool
+from src.feed.depth_feed import DepthFeedClient
 from src.subscription.slot_tracker import SlotTracker
 from src.subscription.tier_config import TierConfig
 from src.subscription.rotation_manager import RotationManager
+from src.utils.market_hours import load_holidays
 
 from src.api.routes import fair as fair_routes
 from src.api.routes import contracts as contract_routes
@@ -23,6 +27,7 @@ from src.api.routes import scrip as scrip_routes
 from src.api.routes import search as search_routes
 from src.api.routes import tiers as tier_routes
 from src.api.routes import health as health_routes
+from src.api.routes import optionchain as optionchain_routes
 
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL), format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -34,6 +39,8 @@ slot_tracker = SlotTracker(total_slots=settings.total_slots)
 tier_config = TierConfig(config_path=f"{settings.SCRIP_CACHE_DIR}/tier_config.json")
 connection_pool = None
 rotation_manager = None
+dhan_client = None  # dhanhq REST API client
+depth_feed = None   # 20-level depth WebSocket
 
 ws_clients: set[WebSocket] = set()
 _ws_lock = asyncio.Lock()
@@ -62,13 +69,58 @@ def fair_callback(result: FairResult):
         asyncio.run_coroutine_threadsafe(broadcast_fair(result), _event_loop)
 
 
+def _handle_depth(depth_data):
+    """Store 20-level depth data into the engine's FairResult."""
+    result = engine.get_result(depth_data.security_id)
+    if result:
+        result.depth_bids = [{"price": l.price, "quantity": l.quantity, "orders": l.orders} for l in depth_data.bids]
+        result.depth_asks = [{"price": l.price, "quantity": l.quantity, "orders": l.orders} for l in depth_data.asks]
+        result.total_bid_depth = depth_data.total_bid_depth
+        result.total_ask_depth = depth_data.total_ask_depth
+        result.bid_ask_imbalance = depth_data.bid_ask_imbalance
+
+
+def _rotate_depth():
+    """Rotate depth feed to track top 50 signal contracts."""
+    if not depth_feed or not engine:
+        return
+    results = engine.get_all_results()
+    top = sorted(
+        [r for r in results if (r.liquidity_score or 0) > 20],
+        key=lambda r: -r.signal_strength,
+    )[:50]
+    if top:
+        instruments = []
+        for r in top:
+            meta = engine.get_contract(r.security_id)
+            if meta:
+                instruments.append((r.security_id, meta.exchange_segment))
+        depth_feed.set_instruments(instruments)
+        logger.info(f"Depth rotation: tracking {len(instruments)} top signals")
+
+
+def _start_depth_rotation():
+    def loop():
+        while True:
+            try:
+                _rotate_depth()
+            except Exception as e:
+                logger.error(f"Depth rotation error: {e}")
+            time.sleep(30)
+    t = threading.Thread(target=loop, name="depth-rotation", daemon=True)
+    t.start()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global connection_pool, rotation_manager, _event_loop
+    global connection_pool, rotation_manager, dhan_client, depth_feed, _event_loop
 
     _event_loop = asyncio.get_running_loop()
 
     engine.on_fair_update(fair_callback)
+
+    # Load market holiday calendar
+    load_holidays(settings.SCRIP_CACHE_DIR)
 
     logger.info("Loading scrip master...")
     try:
@@ -104,6 +156,19 @@ async def lifespan(app: FastAPI):
 
         connection_pool.start()
         logger.info(f"Feed started: {slot_tracker.used} instruments subscribed")
+
+        # Instantiate Dhan REST API client
+        from dhanhq import dhanhq as DhanHQ
+        dhan_client = DhanHQ(client_id=settings.DHAN_CLIENT_ID, access_token=settings.DHAN_ACCESS_TOKEN)
+
+        # Start depth feed
+        depth_feed = DepthFeedClient(
+            client_id=settings.DHAN_CLIENT_ID,
+            access_token=settings.DHAN_ACCESS_TOKEN,
+            on_depth=lambda d: _handle_depth(d),
+        )
+        depth_feed.start()
+        _start_depth_rotation()
     else:
         logger.warning("No Dhan credentials — feed disabled. Set DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN in .env")
 
@@ -122,11 +187,16 @@ async def lifespan(app: FastAPI):
     health_routes.engine = engine
     health_routes.slot_tracker = slot_tracker
     health_routes.connection_pool = connection_pool
+    optionchain_routes.dhan_client = dhan_client
+    optionchain_routes.engine = engine
+    optionchain_routes.scrip_master = scrip_master
 
     yield
 
     _event_loop = None
 
+    if depth_feed:
+        depth_feed.stop()
     if connection_pool:
         connection_pool.stop()
     scrip_master.stop()
@@ -142,6 +212,7 @@ app.include_router(scrip_routes.router)
 app.include_router(search_routes.router)
 app.include_router(tier_routes.router)
 app.include_router(health_routes.router)
+app.include_router(optionchain_routes.router)
 
 
 @app.get("/")
