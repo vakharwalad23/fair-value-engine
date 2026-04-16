@@ -1,0 +1,22 @@
+# Secrets
+.env
+.env.*
+
+# Data + artifacts
+data/
+.cache/
+temp/
+instruments.csv
+*.csv
+
+# Python junk
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# VCS + editor
+.git/
+.DS_Store

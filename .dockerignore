@@ -12,3 +12,4 @@ cache/
 .idea
 .venv
 .claude/
+graphify-out/

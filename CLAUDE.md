@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Graphify
+- Knowledge graph at graphify-out/GRAPH_REPORT.md
+- Read GRAPH_REPORT.md before architecture questions
+- Query graph before any Glob/Grep (hook already installed)
+
 ## Project Overview
 
 Real-time F&O (Futures & Options) fair value calculation engine for Indian markets via Dhan broker. Calculates theoretical prices using Black-Scholes and Cost of Carry models, detects mispricing signals, and serves them via REST/WebSocket APIs.
